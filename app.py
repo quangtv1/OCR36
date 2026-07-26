@@ -642,7 +642,9 @@ class MainWindow(QMainWindow):
         bằng cách khớp bề rộng ô trạng thái với bề rộng panel Cài đặt."""
         if not hasattr(self, "lbl_conn") or not hasattr(self, "split"):
             return
-        self.lbl_conn.setFixedWidth(max(120, self.split.sizes()[0] - 22))
+        # margin trái action bar (12) + spacing (10) = 22, trừ đi 1px đường kẻ
+        # splitter để mép trái progress trùng đúng mép trái block console.
+        self.lbl_conn.setFixedWidth(max(120, self.split.sizes()[0] - 21))
 
     # ------------------------------------------------ nguồn
 
