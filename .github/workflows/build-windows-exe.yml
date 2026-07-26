@@ -20,8 +20,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      # Bản exe chỉ chạy OCR (không kèm torch/transformers để tránh gói ~2GB).
-      # Bước "Sửa lỗi ProtonX" cần cài thêm 3 gói đó khi chạy từ mã nguồn.
+      # Sửa lỗi ProtonX gọi qua server nên client chỉ cần openai (không torch).
       - name: Install dependencies
         run: pip install PyQt5 PyMuPDF Pillow "openai>=1.30" openpyxl pyinstaller
 

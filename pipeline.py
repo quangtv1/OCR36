@@ -63,6 +63,9 @@ _PLACEHOLDER = "\u27e6P{}\u27e7"
 MIN_SIMILARITY = 0.80
 MAX_LENGTH_DRIFT = 0.25
 CORRECTION_MAX_TOKENS = 160
+# ProtonX chạy trên server nên không còn tokenizer để đo độ dài; chia câu
+# dài theo số ký tự (≈ 160 token seq2seq).
+CORRECTION_MAX_CHARS = 600
 
 
 def load_config(path=DEFAULT_CONFIG_FILE) -> dict:
@@ -271,39 +274,42 @@ _corrector_lock = threading.Lock()
 
 class ProtonXCorrector:
     """
-    Bọc protonx-legal-tc. Model là seq2seq sinh văn bản nên MỌI kết quả
+    Bọc protonx-legal-tc chạy trên server OpenAI-compatible (không nạp model ở
+    máy client, không cần torch). Model là seq2seq sinh văn bản nên MỌI kết quả
     đều qua hàng rào; trượt hàng rào thì giữ nguyên bản gốc.
     """
 
-    def __init__(self, model_path, num_beams=10, protected_terms=None):
-        import torch
-        from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+    def __init__(self, endpoint, model, api_key="EMPTY", num_beams=10,
+                 protected_terms=None, use_chat=False, timeout=60):
+        from openai import OpenAI
 
-        self.torch = torch
-        self.tokenizer = AutoTokenizer.from_pretrained(model_path)
-        self.model = AutoModelForSeq2SeqLM.from_pretrained(model_path)
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.model.to(self.device).eval()
+        self.client = OpenAI(api_key=api_key or "EMPTY", base_url=endpoint,
+                             timeout=timeout)
+        self.model = model
+        self.use_chat = use_chat
         self.num_beams = num_beams
+        self.device = "server"        # giữ thuộc tính cho phần log/tương thích
         self.protected_terms = list(protected_terms or [])
         self.stats = {"corrected": 0, "unchanged": 0, "rejected": 0, "skipped": 0}
 
-    # ---- gọi model
+    # ---- gọi model trên server (giải mã tham lam, ổn định qua nhiều bản vLLM)
 
     def _generate(self, text):
-        inputs = self.tokenizer(
-            text, return_tensors="pt", truncation=True,
-            max_length=CORRECTION_MAX_TOKENS,
-        ).to(self.device)
-        with self.torch.no_grad():
-            out = self.model.generate(
-                **inputs,
-                num_beams=self.num_beams,
-                num_return_sequences=1,
-                max_new_tokens=CORRECTION_MAX_TOKENS,
-                early_stopping=True,
+        if self.use_chat:
+            resp = self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": text}],
+                temperature=0,
+                max_tokens=CORRECTION_MAX_TOKENS,
             )
-        return self.tokenizer.decode(out[0], skip_special_tokens=True)
+            return (resp.choices[0].message.content or "").strip()
+        resp = self.client.completions.create(
+            model=self.model,
+            prompt=text,
+            temperature=0,
+            max_tokens=CORRECTION_MAX_TOKENS,
+        )
+        return (resp.choices[0].text or "").strip()
 
     # ---- hàng rào
 
@@ -370,13 +376,13 @@ class ProtonXCorrector:
     # ---- chia câu dài
 
     def _split_if_long(self, text):
-        if len(self.tokenizer(text)["input_ids"]) <= CORRECTION_MAX_TOKENS:
+        if len(text) <= CORRECTION_MAX_CHARS:
             return [text]
 
         chunks, buf = [], ""
         for part in re.split(r"(?<=[.;:!?])\s+", text):
             cand = (buf + " " + part).strip() if buf else part
-            if len(self.tokenizer(cand)["input_ids"]) <= CORRECTION_MAX_TOKENS:
+            if len(cand) <= CORRECTION_MAX_CHARS:
                 buf = cand
             else:
                 if buf:
@@ -431,13 +437,15 @@ class ProtonXCorrector:
         return out, audit
 
 
-def get_corrector(model_path, num_beams, protected_terms):
-    """Cache theo model_path — tải một lần cho cả phiên chạy app."""
+def get_corrector(endpoint, model, api_key, num_beams, protected_terms,
+                  use_chat=False):
+    """Cache theo (endpoint, model) — tạo client một lần cho cả phiên."""
+    key = (endpoint, model)
     with _corrector_lock:
-        if model_path not in _corrector_cache:
-            _corrector_cache[model_path] = ProtonXCorrector(
-                model_path, num_beams, protected_terms)
-        return _corrector_cache[model_path]
+        if key not in _corrector_cache:
+            _corrector_cache[key] = ProtonXCorrector(
+                endpoint, model, api_key, num_beams, protected_terms, use_chat)
+        return _corrector_cache[key]
 
 
 # ============================================================ XỬ LÝ 1 FILE

@@ -121,16 +121,19 @@ class OcrWorker(QThread):
 
         corrector = None
         if cfg.get("use_correction"):
-            self.log.emit("info", "đang tải bộ sửa lỗi ProtonX…")
+            self.log.emit("info", "kết nối bộ sửa lỗi ProtonX…")
             try:
                 corrector = pipeline.get_corrector(
+                    cfg["correction_endpoint"],
                     cfg["correction_model"],
+                    cfg.get("api_key", "EMPTY"),
                     cfg.get("correction_num_beams", 10),
                     cfg.get("protected_terms", []),
+                    cfg.get("correction_use_chat", False),
                 )
-                self.log.emit("info", f"bộ sửa lỗi sẵn sàng ({corrector.device})")
+                self.log.emit("info", "bộ sửa lỗi ProtonX sẵn sàng (server)")
             except Exception as e:
-                self.log.emit("warn", f"không tải được bộ sửa lỗi: {e}")
+                self.log.emit("warn", f"không kết nối được bộ sửa lỗi: {e}")
                 self.log.emit("warn", "chạy tiếp mà không sửa lỗi")
 
         self.writer = pipeline.TsvWriter(cfg["output_dir"], field_keys)
