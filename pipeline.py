@@ -491,6 +491,7 @@ def process_pdf(pdf_path, fields, client, model_name, cfg,
     batch_size = max(workers * 2, 4)
 
     collected, raws = [], {}
+    sent_pages, sent_bytes = 0, 0        # thống kê ảnh base64 đã đẩy lên model
     for start in range(0, len(pages), batch_size):
         if cancel_check and cancel_check():
             break
@@ -501,6 +502,10 @@ def process_pdf(pdf_path, fields, client, model_name, cfg,
         )
         if not rendered:
             continue
+        sent_pages += len(rendered)
+        for _pno, _url in rendered:
+            b64 = _url.split(",", 1)[-1]
+            sent_bytes += (len(b64) * 3) // 4     # độ dài base64 → số byte ảnh
         with ThreadPoolExecutor(max_workers=min(workers, len(rendered))) as ex:
             responses = list(ex.map(_one, rendered))
         for pno, raw in responses:
@@ -527,6 +532,8 @@ def process_pdf(pdf_path, fields, client, model_name, cfg,
         "name": Path(pdf_path).name,
         "total_pages": total,
         "pages_processed": sorted(p + 1 for p, _ in collected),
+        "sent_pages": sent_pages,
+        "sent_bytes": sent_bytes,
         "data": merged,
         "provenance": provenance,
         "correction_audit": audit,

@@ -154,6 +154,10 @@ class OcrWorker(QThread):
 
         self.writer = pipeline.TsvWriter(cfg["output_dir"], field_keys)
         self.log.emit("info", f"ghi TSV: {self.writer.tsv_path.name}")
+        # Tóm tắt instruction (metadata) sẽ gửi kèm mỗi ảnh.
+        self.log.emit(
+            "info",
+            f"prompt gồm {len(field_keys)} trường: {', '.join(field_keys)}")
 
         started = time.time()
         consecutive_errors = 0
@@ -180,6 +184,13 @@ class OcrWorker(QThread):
                     corrector=corrector,
                     cancel_check=lambda: self._abort.is_set(),
                 )
+
+                # Tóm tắt phần đã đẩy lên model: ảnh base64 + instruction.
+                kb = result.get("sent_bytes", 0) // 1024
+                self.log.emit(
+                    "info",
+                    f"đẩy model: {result.get('sent_pages', 0)} ảnh · "
+                    f"~{kb} KB base64 · {len(field_keys)} trường")
 
                 data = result["data"]
                 summary = "\t".join(
