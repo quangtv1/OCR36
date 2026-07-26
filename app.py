@@ -985,16 +985,14 @@ class MainWindow(QMainWindow):
         self.bar.setVisible(busy)
         self._set_prop(self.bar, "hold", s in (State.PAUSING, State.PAUSED))
 
-        texts = {
-            State.DISCONNECTED: ("● Chưa kết nối", C["ts"]),
-            State.CONNECTING: ("● Đang kiểm tra kết nối…", C["ts"]),
-            State.CONNECTED: (f"✓ {self.model_name}", C["ok"]),
-            State.RUNNING: ("● Đang chạy", C["ok"]),
-            State.PAUSING: ("● Đang tạm dừng…", C["warn"]),
-            State.PAUSED: ("● Đã tạm dừng", C["warn"]),
-            State.DONE: ("✓ Đã xong", C["ok"]),
-        }
-        text, color = texts[s]
+        # Góc dưới trái LUÔN cho biết đã kết nối server hay chưa (không đổi theo
+        # tiến trình chạy — tiến trình đã có ở progress bar + bộ đếm).
+        if s == State.DISCONNECTED:
+            text, color = "● Chưa kết nối", C["ts"]
+        elif s == State.CONNECTING:
+            text, color = "● Đang kết nối…", C["ts"]
+        else:                       # CONNECTED / RUNNING / PAUSING / PAUSED / DONE
+            text, color = "✓ Đã kết nối", C["ok"]
         self.lbl_conn.setText(text)
         self.lbl_conn.setStyleSheet(
             f"color:{color};font-size:12px;font-weight:500;")
