@@ -417,18 +417,19 @@ class ResultsTab(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # Thanh công cụ: công tắc wrap + số dòng.
-        bar = QHBoxLayout()
-        bar.setContentsMargins(11, 6, 11, 6)
+        # Công cụ (số dòng + công tắc wrap) đặt ở góc phải thanh tab —
+        # MainWindow gắn qua setCornerWidget và chỉ hiện khi ở tab Kết quả.
+        self.tools = QWidget()
+        tlay = QHBoxLayout(self.tools)
+        tlay.setContentsMargins(0, 0, 11, 0)
+        tlay.setSpacing(10)
+        self.lbl_rows = QLabel("0 dòng")
+        self.lbl_rows.setObjectName("count")
         self.chk_wrap = QCheckBox("Xuống dòng")
         self.chk_wrap.setCursor(Qt.PointingHandCursor)
         self.chk_wrap.toggled.connect(self._apply_wrap)
-        self.lbl_rows = QLabel("0 dòng")
-        self.lbl_rows.setObjectName("count")
-        bar.addWidget(self.chk_wrap)
-        bar.addStretch(1)
-        bar.addWidget(self.lbl_rows)
-        root.addLayout(bar)
+        tlay.addWidget(self.lbl_rows)
+        tlay.addWidget(self.chk_wrap)
 
         self.table = QTableWidget(0, len(self.field_keys) + 1)
         self.table.setHorizontalHeaderLabels(["File"] + self.field_keys)
@@ -709,6 +710,11 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.tab_meta, "Metadata")
         self.tabs.addTab(self.tab_console, "Console")
         self.tabs.addTab(self.tab_results, "Kết quả")
+
+        # Công cụ tab Kết quả nằm ở góc phải thanh tab, chỉ hiện khi mở tab đó.
+        self.tabs.setCornerWidget(self.tab_results.tools, Qt.TopRightCorner)
+        self.tab_results.tools.setVisible(False)
+
         self.tabs.setCurrentIndex(1)
         self.tabs.currentChanged.connect(self._guard_tab_switch)
         self._last_tab = 1
@@ -723,8 +729,11 @@ class MainWindow(QMainWindow):
             self.tabs.blockSignals(True)
             self.tabs.setCurrentIndex(0)
             self.tabs.blockSignals(False)
+            self.tab_results.tools.setVisible(False)
             return
         self._last_tab = index
+        # Công cụ wrap chỉ hiện ở tab Kết quả (index 2).
+        self.tab_results.tools.setVisible(index == 2)
 
     # ------------------------------------------------ thanh hành động
 
