@@ -1,0 +1,40 @@
+{
+  "endpoint": "http://10.20.0.36:8001/v1",
+  "api_key": "KHONGCAN",
+  "fields_file": "data_fields.json",
+  "page_strategy": "first_last",
+  "render_dpi": 200,
+  "max_dimension": 2048,
+  "jpeg_quality": 95,
+  "concurrency": 6,
+  "max_tokens": 512,
+  "request_timeout": 120,
+  "output_dir": "./output",
+  "excel_base_name": null,
+  "use_correction": true,
+  "protect_proper_nouns": true,
+  "correction_model": "protonx-models/protonx-legal-tc",
+  "correction_num_beams": 10,
+  "page_estimate_warn_threshold": 500,
+  "consecutive_error_limit": 3,
+  "seconds_per_page": 0.5,
+  "field_page_preference": {
+    "document_type": "first",
+    "document_number": "first",
+    "issuing_authority": "first",
+    "document_title": "first",
+    "issue_date": "first",
+    "content_purpose": "first",
+    "full_name": "last"
+  },
+  "correction_policy": {
+    "document_type": "correct",
+    "document_number": "skip",
+    "issuing_authority": "protect",
+    "document_title": "correct",
+    "issue_date": "skip",
+    "content_purpose": "correct",
+    "full_name": "skip"
+  },
+  "protected_terms": []
+}

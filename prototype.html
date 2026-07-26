@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prototype — SaoMai OCR36 -v1.0</title>
+<style>
+  :root{
+    --s2:#ffffff; --s1:#f7f6f2; --s0:#f1efe8;
+    --chrome:#eceae3; --line:#e3e1da; --line2:#d3d1c7;
+    --tp:#2c2c2a; --ts:#73726c; --tm:#9c9a92;
+    --acc:#185fa5; --acc-bg:#e6f1fb; --acc-line:#85b7eb;
+    --ok:#0f6e56; --ok-bg:#e1f5ee;
+    --warn:#854f0b; --warn-bg:#faeeda;
+    --dan:#a32d2d; --dan-bg:#fcebeb;
+    --mono:Consolas,"SF Mono",Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;padding:22px;background:#dedcd5;
+    font:13px/1.5 -apple-system,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
+    color:var(--tp);
+  }
+  .mono{font-family:var(--mono)}
+
+  .win{max-width:1120px;margin:0 auto;background:var(--s2);
+    border:1px solid var(--line2);border-radius:8px;overflow:hidden;
+    box-shadow:0 8px 28px rgba(0,0,0,.14)}
+
+  .titlebar{display:flex;align-items:center;gap:8px;padding:9px 12px;
+    background:var(--chrome);border-bottom:1px solid var(--line)}
+  .dot{width:9px;height:9px;border-radius:50%}
+  .titlebar .t{margin-left:6px;color:var(--ts);font-size:12px}
+
+  .srcrow{display:flex;align-items:center;gap:8px;padding:10px 12px;
+    border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .srcrow .lbl{font-size:12px;color:var(--ts)}
+  .pill{font-size:12px;padding:3px 11px;border-radius:6px;cursor:pointer;
+    border:1px solid var(--line);color:var(--ts);user-select:none}
+  .pill:hover{border-color:var(--line2)}
+  .pill.on{background:var(--acc-bg);border-color:var(--acc-bg);color:var(--acc)}
+  .pathbox{flex:1;min-width:140px;font-size:11px;font-family:var(--mono);
+    padding:6px 9px;border:1px solid var(--line);border-radius:6px;
+    color:var(--tp);background:var(--s2);overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap}
+  .pathbox.empty{color:var(--tm)}
+
+  .estrow{padding:6px 12px;background:var(--s1);border-bottom:1px solid var(--line)}
+  .estrow span{font-size:11px;font-family:var(--mono);color:var(--ts)}
+
+  .body{display:flex;align-items:stretch;height:446px}
+
+  .set{width:190px;flex:0 0 190px;padding:11px;border-right:1px solid var(--line);
+    overflow-y:auto}
+  .set h4{margin:0 0 9px;font-size:11px;font-weight:400;color:var(--tm)}
+  .set .k{font-size:11px;color:var(--ts);margin:0 0 3px}
+  .set .v{font-size:11px;font-family:var(--mono);padding:5px 7px;margin:0 0 9px;
+    background:var(--s1);border-radius:6px;overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap}
+  .set .sel{font-size:11px;padding:5px 7px;margin:0 0 9px;border:1px solid var(--line);
+    border-radius:6px;cursor:pointer;display:flex;justify-content:space-between;
+    background:var(--s2)}
+  .set .sel:hover{border-color:var(--line2)}
+  .set .sel.dis{opacity:.45;cursor:not-allowed}
+  .set .box{font-size:11px;padding:5px 7px;margin:0;border:1px solid var(--line);
+    border-radius:6px;text-align:left}
+  .set .pair{display:flex;gap:7px;margin-bottom:9px}
+  .set .pair>div{flex:1;min-width:0}
+  .set .div{border-top:1px solid var(--line);margin:10px 0 9px}
+  .set .chk{font-size:11px;margin:0 0 5px}
+  .set .chk i{color:var(--ok);font-style:normal}
+
+  .dropdown{position:relative}
+  .menu{display:none;position:absolute;left:0;right:0;top:100%;z-index:20;
+    background:var(--s2);border:1px solid var(--line2);border-radius:6px;
+    box-shadow:0 6px 18px rgba(0,0,0,.14);overflow:hidden}
+  .menu.open{display:block}
+  .menu div{font-size:11px;padding:6px 8px;cursor:pointer}
+  .menu div:hover{background:var(--s1)}
+  .menu div.on{background:var(--acc-bg);color:var(--acc)}
+
+  .panel{flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden}
+
+  .tabbar{flex:0 0 auto;display:flex;align-items:center;border-bottom:1px solid var(--line)}
+  .tab{padding:9px 13px;font-size:12px;color:var(--ts);cursor:pointer;
+    border-bottom:2px solid transparent;user-select:none}
+  .tab:hover{color:var(--tp)}
+  .tab.on{color:var(--tp);border-bottom-color:var(--acc-line)}
+  .tabbar .sp{flex:1}
+  .tools{display:none;align-items:center;gap:7px;padding-right:11px}
+  .tools.on{display:flex}
+  .tools .fn{font-size:11px;font-family:var(--mono);color:var(--tm)}
+  .tools .dy{font-size:11px;color:var(--warn)}
+
+  .pane{flex:1;min-height:0;overflow-y:auto;display:none}
+  .pane.on{display:block}
+  #paneMeta.edit{outline:2px solid var(--acc-line);outline-offset:-2px}
+
+  #log{padding:9px 12px;font-family:var(--mono);font-size:11.5px;line-height:1.8}
+  #log .info{color:var(--ts)}
+  #log .data{color:var(--tp);font-weight:500}
+  #log .warn{color:var(--warn)}
+  #log .error{color:var(--dan)}
+  #log .hint{color:var(--tm);font-style:italic}
+
+  .jump{position:sticky;bottom:8px;float:right;margin-right:14px;display:none;
+    font-size:11px;padding:3px 9px;border-radius:12px;cursor:pointer;
+    background:var(--acc);color:#fff;border:0}
+  .jump.on{display:block}
+
+  table{width:100%;border-collapse:collapse;font-size:11.5px}
+  thead td{background:var(--s1);color:var(--ts);position:sticky;top:0;z-index:2}
+  td{padding:6px 10px;border-bottom:1px solid var(--line);text-align:left;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ck{font-family:var(--mono);width:158px}
+  .cp{width:70px;text-align:center}
+  .p-correct{color:var(--ok)} .p-protect{color:var(--warn)} .p-skip{color:var(--tm)}
+  .din{width:100%;font:inherit;padding:3px 6px;border:1px solid var(--line);
+    border-radius:4px;background:var(--s2)}
+  .din:focus{outline:2px solid var(--acc-line);outline-offset:-1px}
+  .w{color:var(--warn)} .e{color:var(--dan)}
+
+  .act{flex:0 0 auto;display:flex;align-items:center;gap:10px;padding:10px 12px;
+    border-top:1px solid var(--line);background:var(--s1);flex-wrap:wrap}
+  .st{font-size:12px;white-space:nowrap;display:flex;align-items:center;gap:6px}
+  .st.s-off{color:var(--ts)} .st.s-on{color:var(--ok)} .st.s-hold{color:var(--warn)}
+  .bar{flex:1;min-width:90px;height:5px;background:var(--line2);border-radius:3px;
+    overflow:hidden;display:none}
+  .bar.on{display:block}
+  .bar>i{display:block;height:100%;width:0;background:var(--acc);transition:width .18s}
+  .bar.hold>i{background:var(--tm)}
+  .ct{font-size:11px;font-family:var(--mono);color:var(--ts);white-space:nowrap}
+  .act .btns{display:flex;align-items:center;gap:8px;margin-left:auto}
+
+  button{font:inherit;font-size:12px;padding:6px 12px;border-radius:6px;cursor:pointer;
+    border:1px solid var(--line2);background:var(--s2);color:var(--tp)}
+  button:hover:not(:disabled){background:var(--s1)}
+  button:active:not(:disabled){transform:scale(.98)}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  button.pri{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:500}
+  button.pri:hover:not(:disabled){filter:brightness(1.12)}
+  button.dan{background:var(--dan);border-color:var(--dan);color:#fff;font-weight:500}
+  button.dan:hover:not(:disabled){filter:brightness(1.12)}
+  button.sm{padding:5px 11px}
+  .off{display:none!important}
+
+  .back{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);
+    align-items:center;justify-content:center;z-index:60}
+  .back.on{display:flex}
+  .dlg{width:410px;background:var(--s2);border:1px solid var(--line2);
+    border-radius:8px;overflow:hidden;box-shadow:0 14px 44px rgba(0,0,0,.3)}
+  .dlg .dt{padding:8px 12px;background:var(--chrome);border-bottom:1px solid var(--line);
+    font-size:12px;color:var(--ts)}
+  .dlg .db{padding:18px 20px}
+  .dlg .dh{display:flex;gap:10px;align-items:flex-start;margin-bottom:14px}
+  .dlg .ic{font-size:20px;line-height:1.1}
+  .dlg .ic.ok{color:var(--ok)} .dlg .ic.wn{color:var(--warn)}
+  .dlg h3{margin:0 0 2px;font-size:14px;font-weight:500}
+  .dlg .sub{margin:0;font-size:12px;color:var(--ts)}
+  .dlg .fb{background:var(--s1);border-radius:6px;padding:10px 12px;margin-bottom:14px}
+  .dlg .fb .l{font-size:11px;color:var(--tm);margin:0 0 4px}
+  .dlg .fb .p{font-size:11px;font-family:var(--mono);margin:0;word-break:break-all}
+  .dlg .wl{display:flex;gap:8px;align-items:center;margin-bottom:16px;
+    font-size:12px;color:var(--ts)}
+  .dlg .btns{display:flex;gap:8px;justify-content:center}
+
+  .note{max-width:1120px;margin:14px auto 0;font-size:12px;color:#6f6d66}
+  .note code{background:#cfcdc6;padding:1px 5px;border-radius:3px;font-family:var(--mono)}
+</style>
+</head>
+<body>
+
+<div class="win">
+  <div class="titlebar">
+    <span class="dot" style="background:#c3c1b9"></span>
+    <span class="dot" style="background:#d3d1c7"></span>
+    <span class="dot" style="background:#e3e1da"></span>
+    <span class="t">SaoMai OCR36 -v1.0</span>
+  </div>
+
+  <div class="srcrow">
+    <span class="lbl">Nguồn</span>
+    <span class="pill" id="pFile">File PDF</span>
+    <span class="pill on" id="pDir">Thư mục</span>
+    <span class="pathbox empty" id="path">chưa chọn nguồn</span>
+    <button class="sm" id="bBrowse">Chọn…</button>
+  </div>
+
+  <div class="estrow"><span id="est">Chưa chọn nguồn</span></div>
+
+  <div class="body">
+    <div class="set">
+      <h4>CÀI ĐẶT · tĩnh</h4>
+      <p class="k">Endpoint</p><p class="v">10.20.0.36:8001</p>
+      <p class="k">Model</p><p class="v" id="vModel">—</p>
+      <p class="k">Chiến lược trang</p>
+      <div class="dropdown">
+        <div class="sel" id="sel"><span id="selTxt">đầu + cuối</span><span>⌄</span></div>
+        <div class="menu" id="menu">
+          <div data-v="first">đầu</div>
+          <div data-v="first_last" class="on">đầu + cuối</div>
+          <div data-v="full">full</div>
+        </div>
+      </div>
+      <div class="pair">
+        <div><p class="k">DPI</p><p class="box">200</p></div>
+        <div><p class="k">Song song</p><p class="box">6</p></div>
+      </div>
+      <p class="k" style="margin-top:9px">Thư mục xuất</p><p class="v">./output/</p>
+      <div class="div"></div>
+      <p class="chk"><i>✓</i> Sửa lỗi ProtonX</p>
+      <p class="chk"><i>✓</i> Bỏ qua tên riêng</p>
+    </div>
+
+    <div class="panel">
+      <div class="tabbar">
+        <div class="tab" data-p="meta">Metadata</div>
+        <div class="tab on" data-p="log">Console</div>
+        <div class="tab" data-p="res">Kết quả</div>
+        <div class="sp"></div>
+        <div class="tools" id="tMeta">
+          <span class="fn">data_fields.json</span>
+          <span class="dy" id="dy"></span>
+          <button class="sm" id="bEdit">Sửa</button>
+          <button class="sm off" id="bUndo">Hoàn tác</button>
+          <button class="sm pri off" id="bSave" disabled>Lưu</button>
+        </div>
+        <div class="tools" id="tRes"><span class="fn" id="resN">0 dòng</span></div>
+      </div>
+
+      <div class="pane" id="paneMeta">
+        <table><thead><tr><td class="ck">Trường</td><td>Mô tả</td><td class="cp">Sửa lỗi</td></tr></thead>
+        <tbody id="mBody"></tbody></table>
+      </div>
+
+      <div class="pane on" id="paneLog">
+        <div id="log"><div class="hint">Bấm “Kết nối server API” để bắt đầu.</div></div>
+        <button class="jump" id="jump">↓ mới nhất</button>
+      </div>
+
+      <div class="pane" id="paneRes">
+        <table><thead><tr id="rHead"></tr></thead><tbody id="rBody"></tbody></table>
+      </div>
+    </div>
+  </div>
+
+  <div class="act">
+    <span class="st off" id="st">● Chưa kết nối · model chưa xác định</span>
+    <div class="bar" id="bar"><i></i></div>
+    <span class="ct" id="ct"></span>
+    <div class="btns">
+      <button class="pri" id="bConnect">Kết nối server API</button>
+      <button class="sm off" id="bDisc">Ngắt</button>
+      <button class="pri off" id="bStart">Bắt đầu</button>
+      <button class="dan off" id="bPause">Tạm dừng</button>
+      <button class="sm off" id="bFinish">Kết thúc</button>
+      <button class="pri off" id="bResume">Tiếp tục</button>
+    </div>
+  </div>
+</div>
+
+<div class="back" id="back">
+  <div class="dlg">
+    <div class="dt">Hoàn tất</div>
+    <div class="db">
+      <div class="dh">
+        <span class="ic ok" id="dIc">✓</span>
+        <div><h3 id="dH">Đã xử lý xong</h3><p class="sub" id="dS"></p></div>
+      </div>
+      <div class="fb" id="dFb">
+        <p class="l">Đã tạo file Excel</p>
+        <p class="p" id="dF"></p>
+        <p class="p" id="dD" style="color:var(--ts);margin-top:7px"></p>
+      </div>
+      <div class="wl off" id="dW"><span style="color:var(--warn)">⚠</span><span id="dWt"></span></div>
+      <div class="btns">
+        <button class="pri" id="dOpen">Mở kết quả</button>
+        <button id="dClose">Đóng</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="back" id="ovBack">
+  <div class="dlg">
+    <div class="dt">File đã tồn tại</div>
+    <div class="db">
+      <div class="dh">
+        <span class="ic wn">?</span>
+        <div>
+          <h3 id="ovName">ket_qua_qd_2024.xlsx</h3>
+          <p class="sub">đã có trong thư mục xuất</p>
+        </div>
+      </div>
+      <div class="fb">
+        <p class="p" id="ovDir">/data/vanban/qd_2024/output/</p>
+      </div>
+      <div class="wl"><span style="color:var(--warn)">⚠</span>
+        <span>Ghi đè sẽ mất bản cũ. Lưu bản mới sẽ thêm timestamp vào tên.</span></div>
+      <div class="btns">
+        <button class="pri" id="ovNew">Lưu bản mới</button>
+        <button class="dan" id="ovOver">Ghi đè</button>
+        <button id="ovSkip">Không xuất</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<p class="note">
+  Prototype tương tác, không gọi server thật. Luồng: <code>Chọn…</code> →
+  <code>Kết nối server API</code> → <code>Bắt đầu</code> →
+  <code>Tạm dừng</code> / <code>Tiếp tục</code> / <code>Kết thúc</code>.
+  Console tự dính đáy khi có dòng mới; cuộn chuột lên để đọc lại, nút
+  <code>↓ mới nhất</code> đưa về cuối.
+</p>
+
+<script>
+const F = {
+  document_type:     ["loại tài liệu là cụm từ ngắn gọn (ví dụ: Quyết định, Thông tư, Chỉ thị, Nghị định, Công văn, v.v.)","correct"],
+  document_number:   ["số hiệu của tài liệu (ví dụ: 123/2024/QĐ-UBND, 45/CT-UBND)","skip"],
+  issuing_authority: ["tên đầy đủ cơ quan, tổ chức hoặc cá nhân ban hành tài liệu","protect"],
+  document_title:    ["tiêu đề của tài liệu về việc gì, bao gồm nhiều dòng, vị trí nằm ở giữa phía đầu văn bản","correct"],
+  issue_date:        ["ngày tháng năm ban hành tài liệu, định dạng dd/mm/yyyy","skip"],
+  content_purpose:   ["mục đích của văn bản là gì, chỉ bóc tách không giải thích","correct"],
+  full_name:         ["Họ và tên người chịu trách nhiệm thi hành quyết định này","skip"],
+};
+const PL = {correct:"sửa", protect:"bảo vệ", skip:"bỏ qua"};
+const K  = Object.keys(F);
+
+const TY=["Quyết định","Thông tư","Chỉ thị","Nghị định","Công văn"];
+const AU=["UBND tỉnh Bắc Giang","Sở Y tế tỉnh Bắc Giang","Bộ Tài chính",
+          "UBND huyện Việt Yên","Sở Giáo dục và Đào tạo"];
+const NM=["Trần Minh Hoàng","Lê Thị Quỳnh","Nguyễn Văn Đệ","Phạm Thu Hà",
+          "Hoàng Đức Thắng","Vũ Thị Mai Anh"];
+
+let sd=20260726; const rnd=()=>(sd=(sd*1103515245+12345)&0x7fffffff)/0x7fffffff;
+const FILES=Array.from({length:50},(_,i)=>{
+  const r=rnd();
+  const pages = r>.93 ? 40+Math.floor(rnd()*40)
+              : r>.68 ? 5+Math.floor(rnd()*9)
+              : 1+Math.floor(rnd()*4);
+  return {name:`qd_${String(i+1).padStart(3,"0")}.pdf`, pages};
+});
+const BAD=new Set([FILES[3].name,FILES[31].name]);
+const NONAME=new Set([FILES[1].name,FILES[12].name,FILES[27].name]);
+
+const $=id=>document.getElementById(id);
+let state="DISCONNECTED", model="", src=null, editing=false, strategy="first_last";
+let i=0, ok=0, bad=0, timer=null, pauseT=null, snap={}, stick=true;
+
+/* ---------- ước lượng ---------- */
+const pagesFor=s=>FILES.reduce((a,f)=>
+  a+(s==="first"||f.pages===1?1:s==="first_last"?2:f.pages),0);
+function est(){
+  if(!src){$("est").textContent="Chưa chọn nguồn";return;}
+  const p=pagesFor(strategy), m=Math.max(1,Math.round(p*.5/60));
+  $("est").textContent=`${FILES.length} file · ${p.toLocaleString("vi-VN")} trang · ~${m} phút`;
+}
+
+/* ---------- console: dính đáy ---------- */
+const pane=()=>$("paneLog");
+function atBottom(){const p=pane();return p.scrollHeight-p.scrollTop-p.clientHeight<24;}
+pane().addEventListener("scroll",()=>{
+  stick=atBottom();
+  $("jump").classList.toggle("on",!stick);
+});
+$("jump").onclick=()=>{stick=true;$("jump").classList.remove("on");toBottom();};
+function toBottom(){const p=pane();p.scrollTop=p.scrollHeight;}
+function log(lvl,txt){
+  const box=$("log"), h=box.querySelector(".hint"); if(h)h.remove();
+  const ts=new Date().toLocaleTimeString("vi-VN",{hour12:false});
+  const d=document.createElement("div");
+  d.className=lvl;
+  d.textContent=(lvl==="data"?"":`[${ts}] `)+(lvl==="data"?txt.replace(/\t/g,"   |   "):txt);
+  box.appendChild(d);
+  if(stick) requestAnimationFrame(toBottom);
+  else $("jump").classList.add("on");
+}
+
+/* ---------- máy trạng thái ---------- */
+const sw=(id,on)=>$(id).classList.toggle("off",!on);
+function apply(){
+  const s=state, busy=["RUNNING","PAUSING","PAUSED"].includes(s);
+  sw("bConnect", s==="DISCONNECTED"||s==="CONNECTING");
+  sw("bDisc",    s==="CONNECTED");
+  sw("bStart",   s==="CONNECTED");
+  sw("bPause",   s==="RUNNING"||s==="PAUSING");
+  sw("bResume",  s==="PAUSED");
+  sw("bFinish",  s==="PAUSED");
+
+  $("bConnect").disabled = s==="CONNECTING";
+  $("bConnect").textContent = s==="CONNECTING"?"Đang kết nối…":"Kết nối server API";
+  $("bStart").disabled = !src;
+  $("bPause").disabled = s!=="RUNNING";
+
+  $("bBrowse").disabled=busy;
+  $("pFile").style.pointerEvents=$("pDir").style.pointerEvents=busy?"none":"";
+  $("pFile").style.opacity=$("pDir").style.opacity=busy?".45":"";
+  $("sel").classList.toggle("dis",busy);
+  $("bEdit").disabled=busy;
+  $("bEdit").title=busy?"Không sửa được metadata khi đang chạy — Kết thúc batch trước":"";
+
+  $("bar").classList.toggle("on",busy);
+  $("bar").classList.toggle("hold",s==="PAUSED"||s==="PAUSING");
+
+  const M={
+    DISCONNECTED:["● Chưa kết nối · model chưa xác định","s-off"],
+    CONNECTING:  ["● Đang kiểm tra kết nối…","s-off"],
+    CONNECTED:   [`✓ ${model}`+(src?` · ${FILES.length} file · ${pagesFor(strategy).toLocaleString("vi-VN")} trang`:""),"s-on"],
+    RUNNING:     ["● đang chạy","s-on"],
+    PAUSING:     ["● đang tạm dừng…","s-hold"],
+    PAUSED:      ["● đã tạm dừng","s-hold"],
+  };
+  const [t,c]=M[s]; $("st").textContent=t; $("st").className="st "+c;
+}
+const go=s=>{state=s;apply();};
+
+/* ---------- nguồn ---------- */
+$("pFile").onclick=()=>{$("pFile").classList.add("on");$("pDir").classList.remove("on");};
+$("pDir").onclick =()=>{$("pDir").classList.add("on");$("pFile").classList.remove("on");};
+$("bBrowse").onclick=()=>{
+  src=true;
+  const p=$("path");
+  p.classList.remove("empty");
+  p.textContent=$("pDir").classList.contains("on")
+    ? "/data/vanban/qd_2024/" : "/data/vanban/qd_2024/qd_001.pdf";
+  est(); apply();
+};
+
+/* ---------- dropdown chiến lược ---------- */
+$("sel").onclick=e=>{
+  if($("sel").classList.contains("dis"))return;
+  e.stopPropagation(); $("menu").classList.toggle("open");
+};
+document.addEventListener("click",()=>$("menu").classList.remove("open"));
+$("menu").querySelectorAll("div").forEach(d=>d.onclick=e=>{
+  e.stopPropagation();
+  strategy=d.dataset.v;
+  $("selTxt").textContent=d.textContent;
+  $("menu").querySelectorAll("div").forEach(x=>x.classList.toggle("on",x===d));
+  $("menu").classList.remove("open");
+  est(); apply();
+});
+
+/* ---------- kết nối ---------- */
+$("bConnect").onclick=()=>{
+  go("CONNECTING");
+  log("info","kết nối http://10.20.0.36:8001/v1 …");
+  setTimeout(()=>{
+    model="Vintern-1B-v3_5";
+    $("vModel").textContent=model;
+    go("CONNECTED");
+    log("info",`kết nối ok — model ${model}`);
+    log("info",`nạp data_fields.json — ${K.length} trường`);
+  },900);
+};
+$("bDisc").onclick=()=>{model="";$("vModel").textContent="—";go("DISCONNECTED");};
+
+/* ---------- bảng kết quả ---------- */
+function head(){$("rHead").innerHTML="<td>File</td>"+K.map(k=>`<td>${k}</td>`).join("");}
+function row(f,d,err){
+  const tr=document.createElement("tr");
+  tr.innerHTML = err
+    ? `<td class="mono e">${f.name}</td><td class="e" colspan="${K.length}">${err}</td>`
+    : `<td class="mono">${f.name}</td>`+K.map(k=>d[k]
+        ? `<td title="${d[k].replace(/"/g,"&quot;")}">${d[k]}</td>`
+        : `<td class="w">— trống</td>`).join("");
+  $("rBody").appendChild(tr);
+  $("resN").textContent=`${$("rBody").children.length} dòng`;
+}
+function fake(f){
+  const t=TY[Math.floor(rnd()*TY.length)];
+  return {
+    document_type:t,
+    document_number:`${1200+i}/${t==="Thông tư"?"2024/TT-BTC":"QĐ-UBND"}`,
+    issuing_authority:AU[Math.floor(rnd()*AU.length)],
+    document_title:"Về việc phê duyệt kế hoạch triển khai nhiệm vụ năm 2024",
+    issue_date:`${String(1+Math.floor(rnd()*27)).padStart(2,"0")}/0${1+Math.floor(rnd()*9)}/2024`,
+    content_purpose:"Phê duyệt và tổ chức thực hiện kế hoạch",
+    full_name:NONAME.has(f.name)?"":NM[Math.floor(rnd()*NM.length)],
+  };
+}
+
+/* ---------- chạy ---------- */
+function step(){
+  if(i>=FILES.length){done(false);return;}
+  const f=FILES[i];
+  const pg = strategy==="first"||f.pages===1 ? [1]
+           : strategy==="first_last" ? [1,f.pages]
+           : Array.from({length:f.pages},(_,x)=>x+1);
+  log("info",`${f.name} · ${f.pages} trang · đọc trang `+
+      (pg.length>4?pg.slice(0,3).join(", ")+"…":pg.join(", ")));
+
+  if(BAD.has(f.name)){
+    bad++; log("error",`${f.name} — không mở được PDF`); row(f,null,"không mở được PDF");
+  }else{
+    const d=fake(f); ok++;
+    log("data",`${d.document_type}\t${d.document_number}\t${d.issue_date}`);
+    if(!d.full_name) log("warn",`full_name rỗng — trang ${f.pages}/${f.pages}`);
+    log("info",`sửa lỗi ${1+Math.floor(rnd()*3)} trường · từ chối ${rnd()>.85?1:0}`);
+    row(f,d,null);
+  }
+  i++;
+  $("bar").firstElementChild.style.width=(i/FILES.length*100)+"%";
+  $("ct").textContent=`${i}/${FILES.length}`+(bad?` · lỗi ${bad}`:"");
+}
+
+$("bStart").onclick=()=>{
+  const p=pagesFor(strategy);
+  if(p>500&&!confirm(`Sẽ OCR ${p.toLocaleString("vi-VN")} trang, ước tính ~${Math.round(p*.5/60)} phút.\n\nTiếp tục?`))return;
+  i=0;ok=0;bad=0;stick=true;
+  $("rBody").innerHTML="";head();$("resN").textContent="0 dòng";
+  $("bar").firstElementChild.style.width="0%";
+  tab("log");
+  log("info","đang tải bộ sửa lỗi ProtonX…");
+  setTimeout(()=>log("info","bộ sửa lỗi sẵn sàng (cuda)"),450);
+  log("info",`ghi TSV: ket_qua_${stamp()}.tsv`);
+  go("RUNNING"); timer=setInterval(step,480);
+};
+$("bPause").onclick=()=>{
+  go("PAUSING"); log("warn","đang tạm dừng — chờ file hiện tại hoàn tất…");
+  pauseT=setTimeout(()=>{
+    pauseT=null;
+    if(state!=="PAUSING") return;      // batch đã tự kết thúc trong lúc chờ
+    clearInterval(timer); timer=null; go("PAUSED");
+  },1100);
+};
+$("bResume").onclick=()=>{go("RUNNING");log("info","tiếp tục");timer=setInterval(step,480);};
+$("bFinish").onclick=()=>{
+  if(!confirm("Chốt batch với những file đã xử lý và xuất Excel?"))return;
+  log("warn","kết thúc sớm theo yêu cầu"); done(true);
+};
+
+const stamp=()=>{const d=new Date(),p=n=>String(n).padStart(2,"0");
+  return `${p(d.getDate())}.${p(d.getMonth()+1)}.${d.getFullYear()}-${p(d.getHours())}.${p(d.getMinutes())}.${p(d.getSeconds())}`;};
+
+/* thư mục xuất mô phỏng — chạy lại cùng nguồn sẽ thấy trùng file */
+const FS = new Set();
+const OUTDIR = "/data/vanban/qd_2024/output/";
+function target(){
+  const p = $("path").textContent;
+  const stem = p.endsWith("/") ? p.replace(/\/+$/,"").split("/").pop()
+                               : p.split("/").pop().replace(/\.pdf$/i,"");
+  return `ket_qua_${stem||"ket_qua"}.xlsx`;
+}
+const stampedName=n=>n.replace(/\.xlsx$/,`_${stamp()}.xlsx`);
+
+function askOverwrite(name, cb){
+  $("ovName").textContent = name;
+  $("ovDir").textContent  = OUTDIR;
+  $("ovBack").classList.add("on");
+  const close = choice => () => { $("ovBack").classList.remove("on"); cb(choice); };
+  $("ovOver").onclick = close("over");
+  $("ovNew").onclick  = close("new");
+  $("ovSkip").onclick = close("skip");
+}
+
+function done(aborted){
+  if(timer){clearInterval(timer);timer=null;}
+  if(pauseT){clearTimeout(pauseT);pauseT=null;}   // huỷ chuyển sang PAUSED
+  go("CONNECTED");
+
+  if(ok===0){ finish(aborted,null,""); return; }
+
+  const t = target();
+  if(FS.has(t)){
+    log("warn",`${t} đã tồn tại trong thư mục xuất`);
+    askOverwrite(t, c=>{
+      if(c==="skip"){ log("warn","bỏ qua xuất Excel"); finish(aborted,null,"người dùng bỏ qua"); }
+      else if(c==="new"){ const n=stampedName(t); FS.add(n);
+        log("info",`đã xuất Excel: ${n}`); finish(aborted,n,""); }
+      else { log("info",`đã ghi đè: ${t}`); finish(aborted,t,""); }
+    });
+  }else{
+    FS.add(t); log("info",`đã xuất Excel: ${t}`); finish(aborted,t,"");
+  }
+}
+
+function finish(aborted, excel, err){
+  if(!excel && !err) log("warn","không có file nào thành công — bỏ qua Excel");
+  log("info",`xong · ${ok} thành công · ${bad} lỗi`);
+
+  $("dIc").className="ic "+(excel?"ok":"wn");
+  $("dIc").textContent=excel?"✓":"!";
+  $("dH").textContent=aborted?`Đã kết thúc sớm — ${i}/${FILES.length} file`
+                             :`Đã xử lý xong ${FILES.length} file`;
+  $("dS").textContent=`${ok} thành công · ${bad} lỗi · ${Math.floor(rnd()*4)} trường bị từ chối`;
+  $("dFb").classList.toggle("off",!excel);
+  $("dF").textContent=excel||"";
+  $("dD").textContent=OUTDIR;
+  const warn = err || (bad?`${bad} file lỗi — xem tab Console`:"");
+  $("dW").classList.toggle("off",!warn);
+  $("dWt").textContent=warn;
+  $("dOpen").textContent = excel ? "Mở kết quả" : "Mở thư mục";
+  $("back").classList.add("on");
+}
+$("dClose").onclick=()=>$("back").classList.remove("on");
+$("dOpen").onclick=()=>{$("back").classList.remove("on");
+  alert("Mở file Excel bằng ứng dụng mặc định.\n(PyQt5: QDesktopServices.openUrl)");};
+
+/* ---------- tabs ---------- */
+function tab(n){
+  if(editing&&n!=="meta"){alert("Đang sửa metadata.\nLưu hoặc hoàn tác trước khi chuyển tab.");return;}
+  document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("on",t.dataset.p===n));
+  $("paneMeta").classList.toggle("on",n==="meta");
+  $("paneLog").classList.toggle("on",n==="log");
+  $("paneRes").classList.toggle("on",n==="res");
+  $("tMeta").classList.toggle("on",n==="meta");
+  $("tRes").classList.toggle("on",n==="res");
+  if(n==="log"&&stick) requestAnimationFrame(toBottom);
+}
+document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>tab(t.dataset.p));
+
+/* ---------- metadata ---------- */
+function meta(){
+  $("mBody").innerHTML="";
+  for(const [k,[d,p]] of Object.entries(F)){
+    const tr=document.createElement("tr");
+    tr.innerHTML=`<td class="ck">${k}</td>`+
+      (editing?`<td><input class="din" data-k="${k}" value="${d.replace(/"/g,"&quot;")}"></td>`
+              :`<td title="${d.replace(/"/g,"&quot;")}">${d}</td>`)+
+      `<td class="cp p-${p}">${PL[p]}</td>`;
+    $("mBody").appendChild(tr);
+  }
+  document.querySelectorAll(".din").forEach(x=>x.oninput=dirty);
+  $("paneMeta").classList.toggle("edit",editing);
+}
+const cur=()=>{const o={};document.querySelectorAll(".din").forEach(x=>o[x.dataset.k]=x.value);return o;};
+const nDirty=()=>{if(!editing)return 0;const c=cur();
+  return Object.keys(c).filter(k=>c[k]!==snap[k]).length;};
+function dirty(){const n=nDirty();
+  $("dy").textContent=n?`${n} thay đổi chưa lưu`:"";$("bSave").disabled=n===0;}
+$("bEdit").onclick=()=>{
+  editing=true; snap=Object.fromEntries(Object.entries(F).map(([k,v])=>[k,v[0]]));
+  sw("bEdit",false);sw("bUndo",true);sw("bSave",true);meta();dirty();
+};
+$("bUndo").onclick=()=>{
+  if(nDirty()&&!confirm(`Bỏ ${nDirty()} thay đổi chưa lưu?`))return;
+  editing=false;sw("bEdit",true);sw("bUndo",false);sw("bSave",false);meta();dirty();
+};
+$("bSave").onclick=()=>{
+  const c=cur(), empty=Object.keys(c).filter(k=>!c[k].trim());
+  if(empty.length){alert("Các trường sau chưa có mô tả:\n"+empty.join("\n"));return;}
+  const n=nDirty(); Object.keys(c).forEach(k=>F[k][0]=c[k]);
+  editing=false;sw("bEdit",true);sw("bUndo",false);sw("bSave",false);meta();dirty();
+  alert(`Đã lưu data_fields.json (${n} thay đổi)\nBản sao lưu: data_fields.${stamp()}.bak`);
+};
+
+meta();head();est();apply();
+</script>
+</body>
+</html>

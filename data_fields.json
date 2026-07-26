@@ -1,0 +1,9 @@
+{
+  "document_type": "loại tài liệu là cụm từ ngắn gọn (ví dụ: Quyết định, Thông tư, Chỉ thị, Nghị định, Công văn, v.v.)",
+  "document_number": "số hiệu của tài liệu (ví dụ: 123/2024/QĐ-UBND, 45/CT-UBND)",
+  "issuing_authority": "tên đầy đủ cơ quan, tổ chức hoặc cá nhân ban hành tài liệu",
+  "document_title": "tiêu đề của tài liệu về việc gì, bao gồm nhiều dòng, vị trí nằm ở giữa phía đầu văn bản",
+  "issue_date": "ngày tháng năm ban hành tài liệu, định dạng dd/mm/yyyy",
+  "content_purpose": "mục đích của văn bản là gì, chỉ bóc tách không giải thích",
+  "full_name": "Họ và tên người chịu trách nhiệm thi hành quyết định này"
+}

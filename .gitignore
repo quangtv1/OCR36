@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# PyInstaller
+build/
+dist/
+*.spec
+
+# App output & scratch
+output/
+tmp/
+
+# OS / editor
+.DS_Store
+
+# Tooling
+.claude/
