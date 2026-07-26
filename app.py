@@ -10,7 +10,7 @@ import sys
 from enum import Enum, auto
 from pathlib import Path
 
-from PyQt5.QtCore import Qt, QUrl
+from PyQt5.QtCore import Qt, QUrl, pyqtSignal
 from PyQt5.QtGui import QColor, QDesktopServices, QFont
 from PyQt5.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog,
@@ -221,6 +221,8 @@ class ConsoleTab(QTextEdit):
 class MetadataTab(QWidget):
     """Bảng ba cột: Trường | Mô tả | Sửa lỗi. Chỉ cột Mô tả sửa được."""
 
+    saved = pyqtSignal(int)     # số trường đã đổi — để ghi log Console
+
     def __init__(self, fields_path, correction_policy, parent=None):
         super().__init__(parent)
         self.fields_path = Path(fields_path)
@@ -352,12 +354,14 @@ class MetadataTab(QWidget):
                                 "Các trường sau chưa có mô tả:\n"
                                 + "\n".join(empty))
             return
+        n_changed = self.dirty_count()
         try:
             backup = pipeline.save_fields(self.fields_path, new_fields)
         except Exception as e:
             QMessageBox.critical(self, "Lỗi", f"Không lưu được:\n{e}")
             return
 
+        self.saved.emit(n_changed)
         self.fields = new_fields
         self._editing = False
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -615,6 +619,16 @@ class MainWindow(QMainWindow):
 
         self._apply_state()
 
+        # Console = nhật ký thao tác. Ghi tóm tắt khi khởi động.
+        self.tab_meta.saved.connect(
+            lambda n: self._log("info", f"lưu metadata — {n} trường thay đổi"))
+        self._log("info", f"khởi động · endpoint {self.cfg['endpoint']} "
+                          f"· {len(self.tab_meta.fields)} trường metadata")
+
+    def _log(self, level, text):
+        """Ghi một dòng tóm tắt vào Console (nhật ký thao tác)."""
+        self.tab_console.append_log(level, text)
+
     # ------------------------------------------------ nguồn
 
     def _build_source_bar(self) -> QWidget:
@@ -670,6 +684,7 @@ class MainWindow(QMainWindow):
             self.last_output_dir = ""
 
         self.ed_path.setText(path)
+        self._log("info", f"chọn nguồn: {path}")
         self._start_scan(path)
 
     def _start_scan(self, path: str):
@@ -700,8 +715,11 @@ class MainWindow(QMainWindow):
         self.lbl_count.setText(f"{len(self.files)} file PDF")
         if not self.files:
             self.lbl_estimate.setText("Không tìm thấy file PDF nào")
+            self._log("warn", "quét xong — không tìm thấy file PDF")
         else:
             self._update_estimate_label()
+            self._log("info", f"quét xong — {len(self.files)} file · "
+                              f"{self.n_pages:,} trang".replace(",", "."))
         self._apply_state()
 
     def _update_estimate_label(self):
@@ -719,6 +737,8 @@ class MainWindow(QMainWindow):
         self.n_pages = sum(
             pipeline.count_selected_pages(n, strat) for n in self.page_counts)
         self._update_estimate_label()
+        self._log("info", f"chiến lược trang: {self.cb_strategy.currentText()} "
+                          f"· {self.n_pages:,} trang".replace(",", "."))
         self._apply_state()
 
     # ------------------------------------------------ cài đặt
@@ -1024,6 +1044,7 @@ class MainWindow(QMainWindow):
         self.ed_model.setText("—")
         self.state = State.DISCONNECTED
         self._apply_state()
+        self._log("info", "đã ngắt kết nối server")
 
     def on_start(self):
         if not self.files:
@@ -1061,6 +1082,13 @@ class MainWindow(QMainWindow):
         self.bar.setValue(0)
         self.tabs.setCurrentIndex(1)
 
+        self._log(
+            "info",
+            f"bắt đầu OCR · {len(self.files)} file · "
+            f"{self.cb_strategy.currentText()} · DPI {cfg['render_dpi']} · "
+            f"song song {cfg['concurrency']} · sửa lỗi "
+            f"{'bật' if cfg['use_correction'] else 'tắt'}")
+
         self.ocr_worker = OcrWorker(
             self.files, self.tab_meta.fields, cfg, self.model_name, parent=self)
         self.ocr_worker.log.connect(self.tab_console.append_log)
@@ -1079,12 +1107,14 @@ class MainWindow(QMainWindow):
             self.ocr_worker.pause()
             self.state = State.PAUSING
             self._apply_state()
+            self._log("warn", "tạm dừng theo yêu cầu")
 
     def on_resume(self):
         if self.ocr_worker:
             self.ocr_worker.resume()
             self.state = State.RUNNING
             self._apply_state()
+            self._log("info", "tiếp tục batch")
 
     def _on_connection_lost(self, message):
         """Worker đã tự tạm dừng do mất kết nối. Hỏi kết nối lại; thành công thì
@@ -1170,6 +1200,8 @@ class MainWindow(QMainWindow):
         """Nút 'Kết quả': mở xlsx; nếu không có thì mở thư mục xuất."""
         target = self.last_excel or self.last_output_dir
         if target:
+            self._log("info", f"mở {'kết quả' if self.last_excel else 'thư mục'}: "
+                              f"{Path(target).name}")
             QDesktopServices.openUrl(QUrl.fromLocalFile(target))
 
     # ------------------------------------------------ xuất Excel
