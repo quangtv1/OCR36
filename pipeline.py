@@ -254,11 +254,24 @@ def normalize_vi(value):
     return value
 
 
-def merge_page_results(page_results, field_keys, preference: dict):
+def is_echoed_description(value, description) -> bool:
+    """True nếu model chép lại chính câu mô tả (instruction) thay vì bóc tách —
+    khi đó coi như không có giá trị, để ô trống."""
+    if not value or not description:
+        return False
+    a = unicodedata.normalize("NFC", str(value)).strip().lower()
+    b = unicodedata.normalize("NFC", str(description)).strip().lower()
+    return bool(a) and a == b
+
+
+def merge_page_results(page_results, field_keys, preference: dict,
+                       descriptions: dict = None):
     """
     page_results: list (page_index, parsed_dict)
+    descriptions: {key: mô tả} — bỏ qua giá trị trùng nguyên văn mô tả.
     Trả về (merged, provenance) — provenance là số trang 1-based.
     """
+    descriptions = descriptions or {}
     merged = {k: "" for k in field_keys}
     provenance = {k: None for k in field_keys}
     ordered = sorted(page_results, key=lambda x: x[0])
@@ -266,11 +279,12 @@ def merge_page_results(page_results, field_keys, preference: dict):
     for key in field_keys:
         pref = preference.get(key, "first")
         candidates = ordered if pref == "first" else list(reversed(ordered))
+        desc = descriptions.get(key, "")
         for pno, data in candidates:
             if not isinstance(data, dict):
                 continue
             val = normalize_vi(data.get(key))
-            if not is_empty(val):
+            if not is_empty(val) and not is_echoed_description(val, desc):
                 merged[key] = val
                 provenance[key] = pno + 1
                 break
@@ -520,7 +534,7 @@ def process_pdf(pdf_path, fields, client, model_name, cfg,
         raise RuntimeError("không parse được JSON từ bất kỳ trang nào")
 
     merged, provenance = merge_page_results(
-        collected, field_keys, cfg["field_page_preference"])
+        collected, field_keys, cfg["field_page_preference"], fields)
 
     audit = {}
     if corrector is not None:
