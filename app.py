@@ -400,37 +400,79 @@ class MetadataTab(QWidget):
 
 # ==================================================== TAB KẾT QUẢ
 
-class ResultsTab(QTableWidget):
+class ResultsTab(QWidget):
+    """Bảng kết quả: cột document_title rộng 1.5×, canh trái mọi cột, có công
+    tắc 'Xuống dòng' để wrap toàn bộ ô."""
+
+    COL_W = 150            # bề rộng cột thường (px)
+    TITLE_MULT = 1.5       # document_title rộng gấp 1.5
+
     def __init__(self, field_keys, parent=None):
-        super().__init__(0, len(field_keys) + 1, parent)
+        super().__init__(parent)
         self.field_keys = list(field_keys)
-        self.setHorizontalHeaderLabels(["File"] + self.field_keys)
-        self.verticalHeader().setVisible(False)
-        self.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.setShowGrid(False)
-        self.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.horizontalHeader().setDefaultSectionSize(140)
-        self.setColumnWidth(0, 150)
         self._mono = QFont(MONO, 10)
         self._mono.setStyleHint(QFont.Monospace)
 
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        # Thanh công cụ: công tắc wrap + số dòng.
+        bar = QHBoxLayout()
+        bar.setContentsMargins(11, 6, 11, 6)
+        self.chk_wrap = QCheckBox("Xuống dòng")
+        self.chk_wrap.setCursor(Qt.PointingHandCursor)
+        self.chk_wrap.toggled.connect(self._apply_wrap)
+        self.lbl_rows = QLabel("0 dòng")
+        self.lbl_rows.setObjectName("count")
+        bar.addWidget(self.chk_wrap)
+        bar.addStretch(1)
+        bar.addWidget(self.lbl_rows)
+        root.addLayout(bar)
+
+        self.table = QTableWidget(0, len(self.field_keys) + 1)
+        self.table.setHorizontalHeaderLabels(["File"] + self.field_keys)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.setShowGrid(False)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setWordWrap(False)
+        self.table.setTextElideMode(Qt.ElideRight)
+
+        hh = self.table.horizontalHeader()
+        hh.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)   # canh trái header
+        hh.setDefaultSectionSize(self.COL_W)
+        self.table.setColumnWidth(0, self.COL_W)
+        for c, key in enumerate(self.field_keys, start=1):
+            w = (int(self.COL_W * self.TITLE_MULT)
+                 if key == "document_title" else self.COL_W)
+            self.table.setColumnWidth(c, w)
+        root.addWidget(self.table)
+
+    # ---- API dùng bởi MainWindow
+
     def clear_rows(self):
-        self.setRowCount(0)
+        self.table.setRowCount(0)
+        self.lbl_rows.setText("0 dòng")
 
     def add_result(self, result: dict):
-        r = self.rowCount()
-        self.insertRow(r)
+        t = self.table
+        r = t.rowCount()
+        t.insertRow(r)
+
         it_name = QTableWidgetItem(result.get("name", ""))
         it_name.setFont(self._mono)
+        it_name.setTextAlignment(Qt.AlignLeft | Qt.AlignTop)
         if result.get("error"):
             it_name.setForeground(QColor(C["dan"]))
-        self.setItem(r, 0, it_name)
+        t.setItem(r, 0, it_name)
 
         if result.get("error"):
             it = QTableWidgetItem(result["error"])
             it.setForeground(QColor(C["dan"]))
-            self.setItem(r, 1, it)
-            self.setSpan(r, 1, 1, len(self.field_keys))
+            it.setTextAlignment(Qt.AlignLeft | Qt.AlignTop)
+            t.setItem(r, 1, it)
+            t.setSpan(r, 1, 1, len(self.field_keys))
         else:
             data = result.get("data") or {}
             for c, key in enumerate(self.field_keys, start=1):
@@ -441,9 +483,21 @@ class ResultsTab(QTableWidget):
                 else:
                     it = QTableWidgetItem(str(val))
                     it.setToolTip(str(val))
-                self.setItem(r, c, it)
+                it.setTextAlignment(Qt.AlignLeft | Qt.AlignTop)  # canh trái nội dung
+                t.setItem(r, c, it)
 
-        self.scrollToBottom()
+        if self.chk_wrap.isChecked():
+            t.resizeRowToContents(r)
+        t.scrollToBottom()
+        self.lbl_rows.setText(f"{t.rowCount()} dòng")
+
+    # ---- wrap toàn bộ dòng
+
+    def _apply_wrap(self):
+        on = self.chk_wrap.isChecked()
+        self.table.setWordWrap(on)
+        self.table.setTextElideMode(Qt.ElideNone if on else Qt.ElideRight)
+        self.table.resizeRowsToContents()
 
 
 # ==================================================== CỬA SỔ CHÍNH
