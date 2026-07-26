@@ -21,7 +21,7 @@ from PyQt5.QtWidgets import (
 )
 
 import pipeline
-from workers import ConnectWorker, EstimateWorker, OcrWorker
+from workers import ConnectWorker, OcrWorker, ScanWorker
 
 # Khi đóng gói bằng PyInstaller, đọc config/data cạnh file .exe để người dùng
 # vẫn chỉnh sửa được; khi chạy mã nguồn thì lấy thư mục chứa app.py.
@@ -191,6 +191,8 @@ class ConsoleTab(QTextEdit):
         self.setObjectName("console")
         self.setReadOnly(True)
         self.setLineWrapMode(QTextEdit.NoWrap)
+        # Giới hạn số dòng để batch lớn (hàng vạn file) không phình bộ nhớ.
+        self.document().setMaximumBlockCount(5000)
         f = QFont(MONO, 10)
         f.setStyleHint(QFont.Monospace)
         self.setFont(f)
@@ -515,8 +517,9 @@ class MainWindow(QMainWindow):
         self.last_output_dir = ""   # fallback mở thư mục khi không có xlsx
 
         self.connect_worker: ConnectWorker | None = None
-        self.estimate_worker: EstimateWorker | None = None
+        self.scan_worker: ScanWorker | None = None
         self.ocr_worker: OcrWorker | None = None
+        self.page_counts: list[int] = []    # số trang mỗi PDF (cache khi quét)
 
         self.setWindowTitle(APP_TITLE)
         self.resize(1120, 720)
@@ -599,30 +602,55 @@ class MainWindow(QMainWindow):
             self.last_output_dir = ""
 
         self.ed_path.setText(path)
-        self.files = pipeline.collect_pdf_files(path)
-        # Cập nhật ngay số PDF đã load ở thanh dưới (cạnh progress bar).
+        self._start_scan(path)
+
+    def _start_scan(self, path: str):
+        """Quét nguồn trong luồng nền (glob + đếm trang) để thư mục rất lớn
+        không treo UI. Huỷ lần quét trước để tránh chồng luồng và số liệu cũ."""
+        if self.scan_worker and self.scan_worker.isRunning():
+            self.scan_worker.requestInterruption()
+
+        self.files = []
+        self.page_counts = []
+        self.n_pages = 0
+        self.lbl_count.setText("")
+        self.lbl_estimate.setText("Đang quét nguồn…")
+        self._apply_state()          # "Bắt đầu" bị khoá khi chưa có file
+
+        self.scan_worker = ScanWorker(path, self.cb_strategy.currentData(), self)
+        self.scan_worker.progress.connect(self._on_scan_progress)
+        self.scan_worker.done.connect(self._on_scan_done)
+        self.scan_worker.start()
+
+    def _on_scan_progress(self, counted, total):
+        self.lbl_estimate.setText(f"Đang quét… {counted}/{total} file")
+
+    def _on_scan_done(self, files, counts, n_pages):
+        self.files = list(files)
+        self.page_counts = list(counts)
+        self.n_pages = n_pages
         self.lbl_count.setText(f"{len(self.files)} file PDF")
         if not self.files:
             self.lbl_estimate.setText("Không tìm thấy file PDF nào")
-            self._apply_state()
-            return
-        self._recount()
+        else:
+            self._update_estimate_label()
+        self._apply_state()
 
-    def _recount(self):
-        if not self.files:
-            return
-        self.lbl_estimate.setText(f"{len(self.files)} file · đang đếm trang…")
-        self.estimate_worker = EstimateWorker(
-            self.files, self.cb_strategy.currentData(), self)
-        self.estimate_worker.done.connect(self._on_estimate)
-        self.estimate_worker.start()
-
-    def _on_estimate(self, n_files, n_pages):
-        self.n_pages = n_pages
+    def _update_estimate_label(self):
         spp = self.cfg.get("seconds_per_page", 0.5)
-        mins = max(1, round(n_pages * spp / 60))
+        mins = max(1, round(self.n_pages * spp / 60))
         self.lbl_estimate.setText(
-            f"{n_files} file · {n_pages:,} trang · ~{mins} phút".replace(",", "."))
+            f"{len(self.files)} file · {self.n_pages:,} trang · ~{mins} phút"
+            .replace(",", "."))
+
+    def _recompute_estimate(self):
+        """Đổi chiến lược trang: tính lại từ số trang đã cache — KHÔNG mở lại PDF."""
+        if not self.page_counts:
+            return
+        strat = self.cb_strategy.currentData()
+        self.n_pages = sum(
+            pipeline.count_selected_pages(n, strat) for n in self.page_counts)
+        self._update_estimate_label()
         self._apply_state()
 
     # ------------------------------------------------ cài đặt
@@ -653,7 +681,8 @@ class MainWindow(QMainWindow):
             self.cb_strategy.addItem(label, key)
         idx = self.cb_strategy.findData(self.cfg["page_strategy"])
         self.cb_strategy.setCurrentIndex(max(idx, 0))
-        self.cb_strategy.currentIndexChanged.connect(lambda _: self._recount())
+        self.cb_strategy.currentIndexChanged.connect(
+            lambda _: self._recompute_estimate())
         lay.addWidget(self.cb_strategy, r, 0, 1, 2); r += 1
 
         lay.addWidget(QLabel("DPI"), r, 0)
@@ -1075,16 +1104,17 @@ class MainWindow(QMainWindow):
                 return
             self.ocr_worker.finish_early()
             self.ocr_worker.wait(15000)
+
+        # Dừng các luồng nền còn lại để tránh crash "QThread destroyed while
+        # running" khi đóng app lúc đang quét thư mục hoặc đang kết nối.
+        for w in (self.scan_worker, self.connect_worker):
+            if w and w.isRunning():
+                w.requestInterruption()
+                w.wait(6000)
         event.accept()
 
 
 def main():
-    cfg_path = APP_DIR / "config.json"
-    if not cfg_path.exists():
-        print(f"Thiếu {cfg_path}")
-        sys.exit(1)
-
-    cfg = pipeline.load_config(cfg_path)
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     app.setApplicationName(APP_TITLE)
@@ -1093,6 +1123,19 @@ def main():
     base.setPixelSize(12)
     app.setFont(base)
     app.setStyleSheet(build_stylesheet())
+
+    # Đọc config với hàng rào lỗi — bản exe để config.json cạnh file, người dùng
+    # có thể sửa hỏng JSON; báo lỗi rõ ràng thay vì crash im lặng lúc mở.
+    cfg_path = APP_DIR / "config.json"
+    try:
+        if not cfg_path.exists():
+            raise FileNotFoundError(f"Thiếu {cfg_path.name} cạnh ứng dụng")
+        cfg = pipeline.load_config(cfg_path)
+    except Exception as e:
+        QMessageBox.critical(None, APP_TITLE,
+                             f"Không đọc được cấu hình:\n{cfg_path}\n\n{e}")
+        sys.exit(1)
+
     win = MainWindow(cfg)
     win.show()
     sys.exit(app.exec_())

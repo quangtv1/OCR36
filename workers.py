@@ -245,20 +245,39 @@ class OcrWorker(QThread):
 
 # ============================================================ ĐẾM TRANG
 
-class EstimateWorker(QThread):
-    """Đếm trang trong nền — thư mục nhiều file thì mở PDF cũng mất thời gian."""
+class ScanWorker(QThread):
+    """Quét nguồn (glob thư mục) + đếm trang từng PDF trong nền.
 
-    done = pyqtSignal(int, int)     # (số file, tổng trang sẽ OCR)
+    Chạy trên luồng riêng để thư mục hàng trăm nghìn file không treo UI.
+    Đếm trang MỘT LẦN rồi trả về để UI cache — đổi chiến lược trang sau đó
+    chỉ cần tính số học, không mở lại PDF. Huỷ được qua requestInterruption().
+    """
 
-    def __init__(self, files, strategy, parent=None):
+    progress = pyqtSignal(int, int)          # (đã đếm, tổng file)
+    done = pyqtSignal(object, object, int)   # (files, page_counts, tổng trang)
+
+    def __init__(self, source, strategy, parent=None):
         super().__init__(parent)
-        self.files = list(files)
+        self.source = source
         self.strategy = strategy
 
     def run(self):
         try:
-            n_files, n_pages = pipeline.estimate_workload(
-                self.files, self.strategy)
-            self.done.emit(n_files, n_pages)
+            files = pipeline.collect_pdf_files(self.source)
         except Exception:
-            self.done.emit(len(self.files), 0)
+            files = []
+        if self.isInterruptionRequested():
+            return
+
+        counts, pages, total = [], 0, len(files)
+        for i, f in enumerate(files):
+            if self.isInterruptionRequested():
+                return
+            n = pipeline.pdf_page_count(f)
+            counts.append(n)
+            pages += pipeline.count_selected_pages(n, self.strategy)
+            if i % 100 == 0:
+                self.progress.emit(i + 1, total)
+
+        if not self.isInterruptionRequested():
+            self.done.emit(files, counts, pages)

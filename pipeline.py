@@ -130,14 +130,26 @@ def select_pages(total_pages: int, strategy: str) -> list[int]:
     return list(range(total_pages))          # full
 
 
-def estimate_workload(files: list[Path], strategy: str) -> tuple[int, int]:
-    """Trả về (số_file, tổng_số_trang_sẽ_OCR). Nhanh vì không render."""
+def count_selected_pages(total_pages: int, strategy: str) -> int:
+    """Số trang sẽ OCR — tính trực tiếp, KHÔNG dựng list. Quan trọng khi ước
+    lượng thư mục lớn: 'full' trên PDF hàng nghìn trang không tạo range khổng lồ."""
+    if total_pages <= 0:
+        return 0
+    if total_pages == 1 or strategy == "first":
+        return 1
+    if strategy == "first_last":
+        return 2
+    return total_pages                        # full
+
+
+def estimate_workload(files, strategy, cancel_check=None) -> tuple[int, int]:
+    """Trả về (số_file, tổng_số_trang_sẽ_OCR). Nhanh vì không render.
+    cancel_check: callable trả True để dừng sớm (thư mục rất lớn)."""
     pages = 0
     for f in files:
-        n = pdf_page_count(f)
-        if n == 0:
-            continue
-        pages += len(select_pages(n, strategy))
+        if cancel_check and cancel_check():
+            break
+        pages += count_selected_pages(pdf_page_count(f), strategy)
     return len(files), pages
 
 
@@ -465,13 +477,6 @@ def process_pdf(pdf_path, fields, client, model_name, cfg,
     strategy = cfg["page_strategy"]
     pages = select_pages(total, strategy)
 
-    rendered = render_pages(
-        pdf_path, pages,
-        cfg["render_dpi"], cfg["max_dimension"], cfg["jpeg_quality"],
-    )
-    if not rendered:
-        raise RuntimeError("không render được trang nào")
-
     def _one(item):
         pno, img_url = item
         if cancel_check and cancel_check():
@@ -480,18 +485,31 @@ def process_pdf(pdf_path, fields, client, model_name, cfg,
         return pno, call_ocr(client, model_name, img_url,
                              prompt, cfg["max_tokens"])
 
-    workers = min(cfg["concurrency"], len(rendered))
-    with ThreadPoolExecutor(max_workers=workers) as ex:
-        responses = list(ex.map(_one, rendered))
+    # Xử lý theo lô để giới hạn RAM: chiến lược 'full' trên PDF hàng nghìn trang
+    # không nạp toàn bộ ảnh cùng lúc — mỗi lô chỉ giữ ~batch ảnh trong bộ nhớ.
+    workers = max(1, min(cfg["concurrency"], len(pages)))
+    batch_size = max(workers * 2, 4)
 
     collected, raws = [], {}
-    for pno, raw in responses:
-        if raw is None:
+    for start in range(0, len(pages), batch_size):
+        if cancel_check and cancel_check():
+            break
+        batch = pages[start:start + batch_size]
+        rendered = render_pages(
+            pdf_path, batch,
+            cfg["render_dpi"], cfg["max_dimension"], cfg["jpeg_quality"],
+        )
+        if not rendered:
             continue
-        raws[pno + 1] = raw
-        parsed = parse_json_loose(raw)
-        if parsed:
-            collected.append((pno, parsed))
+        with ThreadPoolExecutor(max_workers=min(workers, len(rendered))) as ex:
+            responses = list(ex.map(_one, rendered))
+        for pno, raw in responses:
+            if raw is None:
+                continue
+            raws[pno + 1] = raw
+            parsed = parse_json_loose(raw)
+            if parsed:
+                collected.append((pno, parsed))
 
     if not collected:
         raise RuntimeError("không parse được JSON từ bất kỳ trang nào")
