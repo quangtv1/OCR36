@@ -587,6 +587,7 @@ class MainWindow(QMainWindow):
         self.last_output_dir = ""   # fallback mở thư mục khi không có xlsx
         self._run_output_dir = ""   # thư mục xuất đã resolve của lần chạy
         self._reconnecting = False  # đang mở popup kết nối lại (tránh mở nhiều)
+        self._wanted_model = ""     # model do người dùng chỉ định (endpoint ngoài)
 
         self.connect_worker: ConnectWorker | None = None
         self.scan_worker: ScanWorker | None = None
@@ -750,20 +751,19 @@ class MainWindow(QMainWindow):
         lay.setVerticalSpacing(4)
         r = 0
 
-        def ro(text):
-            w = QLineEdit(str(text))
-            w.setObjectName("ro")
-            w.setReadOnly(True)
-            return w
-
         def editable(text):
             # Ô sửa được (nền trắng, có viền) — khoá khi đang chạy batch.
             w = QLineEdit(str(text))
             w.setObjectName("cfgin")
             return w
 
-        # Các ô sửa được khi chưa chạy (endpoint, DPI, song song, thư mục xuất).
+        # Sửa được khi chưa chạy. Endpoint/API key/Model chỉ đổi khi CHƯA kết nối.
         self.ed_endpoint = editable(self.cfg["endpoint"])
+        self.ed_apikey = editable(self.cfg.get("api_key", ""))
+        self.ed_apikey.setEchoMode(QLineEdit.Password)
+        self.ed_apikey.setPlaceholderText("để trống nếu server không cần key")
+        self.ed_model = editable("—")
+        self.ed_model.setPlaceholderText("tự lấy từ server, hoặc gõ vd gpt-4o")
         self.ed_dpi = editable(self.cfg["render_dpi"])
         self.ed_concurrency = editable(self.cfg["concurrency"])
         self.ed_outdir = editable(self.cfg["output_dir"])
@@ -771,8 +771,10 @@ class MainWindow(QMainWindow):
         lay.addWidget(QLabel("Endpoint"), r, 0, 1, 2); r += 1
         lay.addWidget(self.ed_endpoint, r, 0, 1, 2); r += 1
 
+        lay.addWidget(QLabel("API key"), r, 0, 1, 2); r += 1
+        lay.addWidget(self.ed_apikey, r, 0, 1, 2); r += 1
+
         lay.addWidget(QLabel("Model"), r, 0, 1, 2); r += 1
-        self.ed_model = ro("—")      # do server trả về, luôn chỉ đọc
         lay.addWidget(self.ed_model, r, 0, 1, 2); r += 1
 
         lay.addWidget(QLabel("Chiến lược trang"), r, 0, 1, 2); r += 1
@@ -799,7 +801,7 @@ class MainWindow(QMainWindow):
         lay.addWidget(line, r, 0, 1, 2); r += 1
 
         # Hai tuỳ chọn dạng checkbox — tương tác được, mặc định theo config.
-        self.chk_correction = QCheckBox("Sửa lỗi ProtonX")
+        self.chk_correction = QCheckBox("Sửa lỗi chính tả")
         self.chk_correction.setChecked(bool(self.cfg.get("use_correction")))
         self.chk_protect = QCheckBox("Bỏ qua tên riêng")
         self.chk_protect.setChecked(bool(self.cfg.get("protect_proper_nouns")))
@@ -957,10 +959,12 @@ class MainWindow(QMainWindow):
         self.chk_correction.setEnabled(not busy)
         self.chk_protect.setEnabled(not busy)
 
-        # Ô cài đặt sửa được khi chưa chạy; Endpoint chỉ đổi khi đã ngắt kết nối.
+        # Ô cài đặt sửa được khi chưa chạy; Endpoint/API key/Model chỉ đổi khi
+        # đã ngắt kết nối (đổi giữa lúc kết nối là vô nghĩa, phải kết nối lại).
         for w in (self.ed_dpi, self.ed_concurrency, self.ed_outdir):
             w.setEnabled(not busy)
-        self.ed_endpoint.setEnabled(s in (State.DISCONNECTED, State.CONNECTING))
+        for w in (self.ed_endpoint, self.ed_apikey, self.ed_model):
+            w.setEnabled(s in (State.DISCONNECTED, State.CONNECTING))
         self.tab_meta.set_edit_allowed(
             not busy, "Không sửa được metadata khi đang chạy — Kết thúc batch trước")
 
@@ -1015,7 +1019,12 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Thiếu endpoint",
                                 "Nhập địa chỉ endpoint server trước khi kết nối.")
             return
-        self.cfg["endpoint"] = endpoint      # ghi nhớ giá trị vừa sửa cho phiên
+        # Ghi nhớ giá trị vừa sửa cho phiên (endpoint ngoài như OpenAI/Gemini).
+        self.cfg["endpoint"] = endpoint
+        self.cfg["api_key"] = self.ed_apikey.text().strip() or "EMPTY"
+        wanted = self.ed_model.text().strip()
+        self._wanted_model = "" if wanted in ("", "—") else wanted
+
         self.state = State.CONNECTING
         self._apply_state()
         self.tab_console.append_log("info", f"kết nối {endpoint}…")
@@ -1025,12 +1034,15 @@ class MainWindow(QMainWindow):
         self.connect_worker.fail.connect(self._on_connect_fail)
         self.connect_worker.start()
 
-    def _on_connect_ok(self, model_name):
-        self.model_name = model_name
-        self.ed_model.setText(model_name)
+    def _on_connect_ok(self, server_model):
+        # Ưu tiên model người dùng chỉ định (endpoint nhiều model như OpenAI/
+        # Gemini); nếu để trống thì dùng model đầu tiên server trả về (vLLM).
+        self.model_name = self._wanted_model or server_model
+        self.ed_model.setText(self.model_name)
         self.state = State.CONNECTED
         self._apply_state()
-        self.tab_console.append_log("info", f"kết nối ok — model {model_name}")
+        self.tab_console.append_log(
+            "info", f"kết nối ok — model {self.model_name}")
 
     def _on_connect_fail(self, message):
         self.state = State.DISCONNECTED
