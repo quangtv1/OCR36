@@ -588,6 +588,7 @@ class MainWindow(QMainWindow):
         self.last_output_dir = ""   # fallback mở thư mục khi không có xlsx
         self._run_output_dir = ""   # thư mục xuất đã resolve của lần chạy
         self._reconnecting = False  # đang mở popup kết nối lại (tránh mở nhiều)
+        self._conn_lost = False     # mất kết nối server giữa batch (đồng bộ status)
         self._wanted_model = ""     # model do người dùng chỉ định (endpoint ngoài)
         self._run_started = 0.0     # mốc thời gian bắt đầu batch (ETA thực tế)
 
@@ -984,6 +985,8 @@ class MainWindow(QMainWindow):
             ctext, ccolor = "● Chưa kết nối", C["ts"]
         elif s == State.CONNECTING:
             ctext, ccolor = "● Đang kết nối…", C["ts"]
+        elif self._conn_lost:       # rớt kết nối giữa batch → báo đỏ
+            ctext, ccolor = "✗ Mất kết nối", C["dan"]
         else:                       # CONNECTED / RUNNING / PAUSING / PAUSED / DONE
             ctext, ccolor = "✓ Đã kết nối", C["ok"]
         self.lbl_conn.setText(ctext)
@@ -1037,6 +1040,7 @@ class MainWindow(QMainWindow):
                                 "Nhập địa chỉ endpoint server trước khi kết nối.")
             return
         # Ghi nhớ giá trị vừa sửa cho phiên (endpoint ngoài như OpenAI/Gemini).
+        self._conn_lost = False
         self.cfg["endpoint"] = endpoint
         self.cfg["api_key"] = self.ed_apikey.text().strip() or "EMPTY"
         wanted = self.ed_model.text().strip()
@@ -1141,6 +1145,7 @@ class MainWindow(QMainWindow):
 
     def on_resume(self):
         if self.ocr_worker:
+            self._conn_lost = False     # người dùng chủ động tiếp tục
             self.ocr_worker.resume()
             self.state = State.RUNNING
             self._apply_state()
@@ -1152,6 +1157,7 @@ class MainWindow(QMainWindow):
         if self._reconnecting:
             return
         self._reconnecting = True
+        self._conn_lost = True          # đồng bộ status → "✗ Mất kết nối"
         self.state = State.PAUSED
         self._apply_state()
 
@@ -1161,6 +1167,7 @@ class MainWindow(QMainWindow):
         self._reconnecting = False
 
         if dlg.reconnected and self.ocr_worker and self.ocr_worker.isRunning():
+            self._conn_lost = False
             self.tab_console.append_log("info", "kết nối lại OK — tiếp tục batch")
             self.ocr_worker.resume()
             self.state = State.RUNNING
@@ -1168,6 +1175,7 @@ class MainWindow(QMainWindow):
         else:
             self.tab_console.append_log(
                 "warn", "vẫn tạm dừng — bấm Tiếp tục khi server sẵn sàng")
+            self._apply_state()         # giữ status "✗ Mất kết nối"
 
     def on_finish(self):
         if not self.ocr_worker:

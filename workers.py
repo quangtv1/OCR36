@@ -64,10 +64,13 @@ class OcrWorker(QThread):
 
     @staticmethod
     def _is_conn_error(e) -> bool:
-        """Lỗi có phải do mất kết nối server không (để tạm dừng + hỏi kết nối lại)."""
+        """Lỗi có phải do server không dùng được không (mất kết nối HOẶC engine
+        vLLM crash) — để tạm dừng + hỏi kết nối lại thay vì đếm lỗi từng file."""
         try:
             import openai
-            if isinstance(e, (openai.APIConnectionError, openai.APITimeoutError)):
+            # Mất kết nối, timeout, hoặc server trả 5xx (vLLM engine crash).
+            if isinstance(e, (openai.APIConnectionError, openai.APITimeoutError,
+                              openai.InternalServerError)):
                 return True
         except Exception:
             pass
@@ -75,7 +78,10 @@ class OcrWorker(QThread):
         return any(s in msg for s in (
             "connection error", "connection refused", "connection aborted",
             "timed out", "timeout", "max retries", "failed to establish",
-            "no route to host", "name or service not known"))
+            "no route to host", "name or service not known",
+            # Dấu hiệu vLLM/InternVL engine sập giữa chừng.
+            "internal server error", "sizes of tensors must match",
+            "server was interrupted", "server disconnected"))
 
     def __init__(self, files, fields, cfg, model_name, parent=None):
         super().__init__(parent)
