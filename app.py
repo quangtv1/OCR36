@@ -180,6 +180,7 @@ class State(Enum):
     RUNNING = auto()
     PAUSING = auto()
     PAUSED = auto()
+    DONE = auto()          # đã xử lý xong: hiện "Kết quả" / "Chạy lại"
 
 
 # ==================================================== TAB CONSOLE
@@ -455,6 +456,8 @@ class MainWindow(QMainWindow):
         self.model_name = ""
         self.files: list[Path] = []
         self.n_pages = 0
+        self.last_excel = ""        # xlsx của lần chạy gần nhất (mở bằng "Kết quả")
+        self.last_output_dir = ""   # fallback mở thư mục khi không có xlsx
 
         self.connect_worker: ConnectWorker | None = None
         self.estimate_worker: EstimateWorker | None = None
@@ -534,6 +537,12 @@ class MainWindow(QMainWindow):
             self._set_source(path)
 
     def _set_source(self, path: str):
+        # Nguồn mới → rời trạng thái DONE, ẩn "Kết quả"/"Chạy lại", chỉ còn "Bắt đầu".
+        if self.state == State.DONE:
+            self.state = State.CONNECTED
+            self.last_excel = ""
+            self.last_output_dir = ""
+
         self.ed_path.setText(path)
         self.files = pipeline.collect_pdf_files(path)
         # Cập nhật ngay số PDF đã load ở thanh dưới (cạnh progress bar).
@@ -693,18 +702,22 @@ class MainWindow(QMainWindow):
         self.btn_pause = QPushButton("Tạm dừng")
         self.btn_resume = QPushButton("Tiếp tục")
         self.btn_finish = QPushButton("Kết thúc")
+        self.btn_result = QPushButton("Kết quả")     # mở xlsx sau khi xong
+        self.btn_rerun = QPushButton("Chạy lại")     # chạy lại cùng nguồn
 
         self.btn_pause.setObjectName("dan")
-        for b in (self.btn_start, self.btn_resume):
+        for b in (self.btn_start, self.btn_resume, self.btn_result):
             b.setObjectName("pri")
 
         self.btn_start.clicked.connect(self.on_start)
         self.btn_pause.clicked.connect(self.on_pause)
         self.btn_resume.clicked.connect(self.on_resume)
         self.btn_finish.clicked.connect(self.on_finish)
+        self.btn_rerun.clicked.connect(self.on_start)
+        self.btn_result.clicked.connect(self.on_open_result)
 
         for b in (self.btn_start, self.btn_finish, self.btn_resume,
-                  self.btn_pause):
+                  self.btn_pause, self.btn_rerun, self.btn_result):
             b.setCursor(Qt.PointingHandCursor)
             lay.addWidget(b)
         return box
@@ -715,12 +728,13 @@ class MainWindow(QMainWindow):
         s = self.state
         has_files = bool(self.files)
 
+        # Chưa chạy = hiện "Bắt đầu"; đã xong = hiện "Kết quả"/"Chạy lại".
         idle = s in (State.DISCONNECTED, State.CONNECTING, State.CONNECTED)
 
-        # Kết nối / ngắt nằm trong panel Cài đặt.
+        # Kết nối / ngắt nằm trong panel Cài đặt (DONE vẫn đang kết nối).
         self.btn_connect.setVisible(s in (State.DISCONNECTED, State.CONNECTING))
         self.btn_connect.setEnabled(s == State.DISCONNECTED)
-        self.btn_disconnect.setVisible(s == State.CONNECTED)
+        self.btn_disconnect.setVisible(s in (State.CONNECTED, State.DONE))
 
         # "Bắt đầu" luôn hiện khi chưa chạy; chỉ bật khi đã kết nối + có nguồn.
         self.btn_start.setVisible(idle)
@@ -729,6 +743,13 @@ class MainWindow(QMainWindow):
         self.btn_pause.setEnabled(s == State.RUNNING)
         self.btn_resume.setVisible(s == State.PAUSED)
         self.btn_finish.setVisible(s == State.PAUSED)
+
+        # Sau khi xong: "Kết quả" (mở xlsx) + "Chạy lại".
+        self.btn_result.setVisible(s == State.DONE)
+        self.btn_result.setEnabled(bool(self.last_excel or self.last_output_dir))
+        self.btn_result.setText("Kết quả" if self.last_excel else "Mở thư mục")
+        self.btn_rerun.setVisible(s == State.DONE)
+        self.btn_rerun.setEnabled(has_files)
 
         if s == State.CONNECTING:
             self.btn_connect.setVisible(True)
@@ -756,6 +777,7 @@ class MainWindow(QMainWindow):
             State.RUNNING: ("● Đang chạy", C["ok"]),
             State.PAUSING: ("● Đang tạm dừng…", C["warn"]),
             State.PAUSED: ("● Đã tạm dừng", C["warn"]),
+            State.DONE: ("✓ Đã xong", C["ok"]),
         }
         text, color = texts[s]
         self.lbl_conn.setText(text)
@@ -876,9 +898,9 @@ class MainWindow(QMainWindow):
 
     def _on_worker_state(self, name):
         # Tín hiệu từ worker được Qt xếp hàng, nên có thể đến sau khi batch
-        # đã chốt. Nếu đã về CONNECTED thì bỏ qua, tránh rơi lại vào PAUSED
-        # và hiện nút Tiếp tục / Kết thúc cho một worker không còn chạy.
-        if self.state == State.CONNECTED:
+        # đã chốt. Nếu đã rời trạng thái chạy thì bỏ qua, tránh rơi lại vào
+        # PAUSED và hiện nút Tiếp tục / Kết thúc cho một worker không còn chạy.
+        if self.state in (State.CONNECTED, State.DONE):
             return
         mapping = {"running": State.RUNNING,
                    "pausing": State.PAUSING,
@@ -888,9 +910,6 @@ class MainWindow(QMainWindow):
             self._apply_state()
 
     def _on_finished(self, stats: dict):
-        self.state = State.CONNECTED
-        self._apply_state()
-
         secs = stats.get("elapsed", 0)
         if stats.get("ok") and secs:
             pages = max(self.n_pages, 1)
@@ -904,7 +923,22 @@ class MainWindow(QMainWindow):
         if stats.get("ok") and stats.get("tsv"):
             self._export_excel(stats)
 
-        self._show_completion(stats)
+        # Lưu đường dẫn để nút "Kết quả" mở; không còn popup hoàn tất.
+        self.last_excel = stats.get("excel", "")
+        self.last_output_dir = str(Path(APP_DIR / self.cfg["output_dir"]))
+        self.tab_console.append_log(
+            "info", f"đã xuất Excel: {Path(self.last_excel).name}"
+            if self.last_excel else "không có Excel — mở thư mục để lấy TSV")
+
+        self.tabs.setCurrentIndex(2)      # hiện tab Kết quả
+        self.state = State.DONE
+        self._apply_state()
+
+    def on_open_result(self):
+        """Nút 'Kết quả': mở xlsx; nếu không có thì mở thư mục xuất."""
+        target = self.last_excel or self.last_output_dir
+        if target:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(target))
 
     # ------------------------------------------------ xuất Excel
 
@@ -964,47 +998,6 @@ class MainWindow(QMainWindow):
         except Exception as e:
             stats["export_error"] = str(e)
             self.tab_console.append_log("error", f"xuất Excel thất bại: {e}")
-
-    # ------------------------------------------------ popup hoàn tất
-
-    def _show_completion(self, stats: dict):
-        excel = stats.get("excel", "")
-        box = QMessageBox(self)
-        box.setWindowTitle("Hoàn tất")
-
-        head = ("Đã kết thúc sớm" if stats.get("aborted")
-                else f"Đã xử lý xong {stats['total']} file")
-        detail = [f"{stats['ok']} thành công · {stats['fail']} lỗi"]
-
-        corr = stats.get("correction")
-        if corr:
-            detail.append(
-                f"sửa lỗi {corr['corrected']} · từ chối {corr['rejected']}")
-
-        if excel:
-            box.setIcon(QMessageBox.Information)
-            detail.append(Path(excel).name)
-        elif stats.get("export_error"):
-            box.setIcon(QMessageBox.Warning)
-            detail.append(f"Xuất Excel lỗi: {stats['export_error']}")
-            detail.append("File TSV vẫn còn trong thư mục xuất.")
-        else:
-            box.setIcon(QMessageBox.Warning)
-            detail.append("Không có file nào thành công — xem tab Console.")
-
-        box.setText(head)
-        box.setInformativeText("\n".join(detail))
-
-        # Có Excel -> mở file. Không có -> mở thư mục để lấy TSV.
-        label = "Mở kết quả" if excel else "Mở thư mục"
-        btn_open = box.addButton(label, QMessageBox.AcceptRole)
-        box.addButton("Đóng", QMessageBox.RejectRole)
-        box.setDefaultButton(btn_open)
-        box.exec_()
-
-        if box.clickedButton() is btn_open:
-            path = excel or str(Path(stats.get("tsv") or APP_DIR).parent)
-            QDesktopServices.openUrl(QUrl.fromLocalFile(path))
 
     # ------------------------------------------------ đóng app
 
