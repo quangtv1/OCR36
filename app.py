@@ -7,6 +7,7 @@ Chạy:  python app.py
 from __future__ import annotations
 
 import sys
+import time
 from enum import Enum, auto
 from pathlib import Path
 
@@ -588,6 +589,7 @@ class MainWindow(QMainWindow):
         self._run_output_dir = ""   # thư mục xuất đã resolve của lần chạy
         self._reconnecting = False  # đang mở popup kết nối lại (tránh mở nhiều)
         self._wanted_model = ""     # model do người dùng chỉ định (endpoint ngoài)
+        self._run_started = 0.0     # mốc thời gian bắt đầu batch (ETA thực tế)
 
         self.connect_worker: ConnectWorker | None = None
         self.scan_worker: ScanWorker | None = None
@@ -614,9 +616,14 @@ class MainWindow(QMainWindow):
         split.setStretchFactor(0, 0)
         split.setStretchFactor(1, 1)
         split.setSizes([210, 910])
+        self.split = split
         root.addWidget(split, 1)
 
         root.addWidget(self._build_action_bar())
+
+        # Căn trái progress bar (trong action bar) trùng mép trái block console.
+        self.split.splitterMoved.connect(lambda *a: self._sync_progress_align())
+        self._sync_progress_align()
 
         self._apply_state()
 
@@ -629,6 +636,13 @@ class MainWindow(QMainWindow):
     def _log(self, level, text):
         """Ghi một dòng tóm tắt vào Console (nhật ký thao tác)."""
         self.tab_console.append_log(level, text)
+
+    def _sync_progress_align(self):
+        """Cho mép trái progress bar (ở action bar) trùng mép trái block console
+        bằng cách khớp bề rộng ô trạng thái với bề rộng panel Cài đặt."""
+        if not hasattr(self, "lbl_conn") or not hasattr(self, "split"):
+            return
+        self.lbl_conn.setFixedWidth(max(120, self.split.sizes()[0] - 22))
 
     # ------------------------------------------------ nguồn
 
@@ -1093,6 +1107,7 @@ class MainWindow(QMainWindow):
         self.bar.setRange(0, len(self.files))
         self.bar.setValue(0)
         self.tabs.setCurrentIndex(1)
+        self._run_started = time.monotonic()     # mốc để tính ETA thực tế
 
         self._log(
             "info",
@@ -1166,8 +1181,18 @@ class MainWindow(QMainWindow):
 
     def _on_progress(self, done, total, errors):
         self.bar.setValue(done)
-        self.lbl_count.setText(f"{done}/{total}" +
-                               (f" · lỗi {errors}" if errors else ""))
+        txt = f"{done}/{total}"
+        # ETA tính từ tốc độ thực tế (thời gian đã chạy / số file đã xong).
+        if done > 0 and self._run_started and done < total:
+            per = (time.monotonic() - self._run_started) / done
+            remain = per * (total - done)
+            if remain >= 60:
+                txt += f" · còn ~{round(remain / 60)} phút"
+            else:
+                txt += f" · còn ~{max(1, round(remain))}s"
+        if errors:
+            txt += f" · lỗi {errors}"
+        self.lbl_count.setText(txt)
 
     def _on_worker_state(self, name):
         # Tín hiệu từ worker được Qt xếp hàng, nên có thể đến sau khi batch
