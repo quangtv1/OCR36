@@ -536,6 +536,8 @@ class MainWindow(QMainWindow):
     def _set_source(self, path: str):
         self.ed_path.setText(path)
         self.files = pipeline.collect_pdf_files(path)
+        # Cập nhật ngay số PDF đã load ở thanh dưới (cạnh progress bar).
+        self.lbl_count.setText(f"{len(self.files)} file PDF")
         if not self.files:
             self.lbl_estimate.setText("Không tìm thấy file PDF nào")
             self._apply_state()
