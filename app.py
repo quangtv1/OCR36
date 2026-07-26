@@ -814,23 +814,28 @@ class MainWindow(QMainWindow):
         lay.addWidget(self.chk_correction, r, 0, 1, 2); r += 1
         lay.addWidget(self.chk_protect, r, 0, 1, 2); r += 1
 
-        # Khoảng cách nhỏ rồi nút kết nối — căn giữa, cỡ bằng nút Bắt đầu.
-        lay.setRowMinimumHeight(r, 14); r += 1
+        lay.setRowMinimumHeight(r, 12); r += 1
 
+        # Khối kết nối trên một hàng: trạng thái bên trái, nút Kết nối/Ngắt phải.
+        self.lbl_conn = QLabel("● Chưa kết nối")
         self.btn_connect = QPushButton("Kết nối")
         self.btn_disconnect = QPushButton("Ngắt")
         self.btn_connect.setObjectName("pri")
         for b in (self.btn_connect, self.btn_disconnect):
+            b.setProperty("mini", True)
             b.setCursor(Qt.PointingHandCursor)
         self.btn_connect.clicked.connect(self.on_connect)
         self.btn_disconnect.clicked.connect(self.on_disconnect)
-        lay.addWidget(self.btn_connect, r, 0, 1, 2, Qt.AlignHCenter)
-        lay.addWidget(self.btn_disconnect, r, 0, 1, 2, Qt.AlignHCenter)
-        r += 1
 
-        # Trạng thái kết nối ngay dưới nút Kết nối/Ngắt.
-        self.lbl_conn = QLabel("● Chưa kết nối")
-        lay.addWidget(self.lbl_conn, r, 0, 1, 2, Qt.AlignHCenter)
+        conn_row = QWidget()
+        h = QHBoxLayout(conn_row)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(8)
+        h.addWidget(self.lbl_conn)
+        h.addStretch(1)
+        h.addWidget(self.btn_connect)
+        h.addWidget(self.btn_disconnect)
+        lay.addWidget(conn_row, r, 0, 1, 2)
         r += 1
 
         lay.setRowStretch(r, 1)
@@ -953,13 +958,6 @@ class MainWindow(QMainWindow):
         self.btn_result.setText("Kết quả" if self.last_excel else "Mở thư mục")
         self.btn_rerun.setVisible(s == State.DONE)
         self.btn_rerun.setEnabled(has_files)
-
-        if s == State.CONNECTING:
-            self.btn_connect.setVisible(True)
-            self.btn_connect.setEnabled(False)
-            self.btn_connect.setText("Đang kết nối…")
-        else:
-            self.btn_connect.setText("Kết nối")
 
         busy = s in (State.RUNNING, State.PAUSING, State.PAUSED)
         self.btn_pick_file.setEnabled(not busy)
