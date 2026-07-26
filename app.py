@@ -621,10 +621,6 @@ class MainWindow(QMainWindow):
 
         root.addWidget(self._build_action_bar())
 
-        # Căn trái progress bar (trong action bar) trùng mép trái block console.
-        self.split.splitterMoved.connect(lambda *a: self._sync_progress_align())
-        self._sync_progress_align()
-
         self._apply_state()
 
         # Console = nhật ký thao tác. Ghi tóm tắt khi khởi động.
@@ -636,15 +632,6 @@ class MainWindow(QMainWindow):
     def _log(self, level, text):
         """Ghi một dòng tóm tắt vào Console (nhật ký thao tác)."""
         self.tab_console.append_log(level, text)
-
-    def _sync_progress_align(self):
-        """Cho mép trái progress bar (ở action bar) trùng mép trái block console
-        bằng cách khớp bề rộng ô trạng thái với bề rộng panel Cài đặt."""
-        if not hasattr(self, "lbl_conn") or not hasattr(self, "split"):
-            return
-        # margin trái action bar (12) + spacing (10) = 22, trừ đi 1px đường kẻ
-        # splitter để mép trái progress trùng đúng mép trái block console.
-        self.lbl_conn.setFixedWidth(max(120, self.split.sizes()[0] - 21))
 
     # ------------------------------------------------ nguồn
 
@@ -840,6 +827,11 @@ class MainWindow(QMainWindow):
         lay.addWidget(self.btn_disconnect, r, 0, 1, 2, Qt.AlignHCenter)
         r += 1
 
+        # Trạng thái kết nối ngay dưới nút Kết nối/Ngắt.
+        self.lbl_conn = QLabel("● Chưa kết nối")
+        lay.addWidget(self.lbl_conn, r, 0, 1, 2, Qt.AlignHCenter)
+        r += 1
+
         lay.setRowStretch(r, 1)
         return box
 
@@ -891,15 +883,15 @@ class MainWindow(QMainWindow):
         lay.setContentsMargins(12, 10, 12, 10)
         lay.setSpacing(10)
 
-        # Trạng thái nằm bên trái thanh dưới.
-        self.lbl_conn = QLabel("● Chưa kết nối")
-        lay.addWidget(self.lbl_conn)
+        # Mô tả tiến trình (Đang chạy / Tạm dừng / Đã xong) bên trái thanh dưới.
+        self.lbl_run = QLabel("")
+        lay.addWidget(self.lbl_run)
 
         self.bar = QProgressBar()
         self.bar.setTextVisible(False)
         self.bar.setFixedHeight(5)
         self.bar.setProperty("hold", False)
-        lay.addWidget(self.bar, 1)
+        lay.addWidget(self.bar, 3)      # chiếm phần lớn bề rộng còn lại
 
         self.lbl_count = QLabel("")
         self.lbl_count.setObjectName("count")
@@ -987,17 +979,28 @@ class MainWindow(QMainWindow):
         self.bar.setVisible(busy)
         self._set_prop(self.bar, "hold", s in (State.PAUSING, State.PAUSED))
 
-        # Góc dưới trái LUÔN cho biết đã kết nối server hay chưa (không đổi theo
-        # tiến trình chạy — tiến trình đã có ở progress bar + bộ đếm).
+        # Trạng thái kết nối (trong panel Cài đặt, dưới nút Kết nối/Ngắt).
         if s == State.DISCONNECTED:
-            text, color = "● Chưa kết nối", C["ts"]
+            ctext, ccolor = "● Chưa kết nối", C["ts"]
         elif s == State.CONNECTING:
-            text, color = "● Đang kết nối…", C["ts"]
+            ctext, ccolor = "● Đang kết nối…", C["ts"]
         else:                       # CONNECTED / RUNNING / PAUSING / PAUSED / DONE
-            text, color = "✓ Đã kết nối", C["ok"]
-        self.lbl_conn.setText(text)
+            ctext, ccolor = "✓ Đã kết nối", C["ok"]
+        self.lbl_conn.setText(ctext)
         self.lbl_conn.setStyleSheet(
-            f"color:{color};font-size:12px;font-weight:500;")
+            f"color:{ccolor};font-size:11px;font-weight:500;")
+
+        # Mô tả tiến trình bên trái thanh dưới (chỉ khi đang chạy / xong).
+        run_map = {
+            State.RUNNING: ("● Đang chạy", C["ok"]),
+            State.PAUSING: ("● Đang tạm dừng…", C["warn"]),
+            State.PAUSED: ("● Đã tạm dừng", C["warn"]),
+            State.DONE: ("✓ Đã xong", C["ok"]),
+        }
+        rtext, rcolor = run_map.get(s, ("", C["ts"]))
+        self.lbl_run.setText(rtext)
+        self.lbl_run.setStyleSheet(
+            f"color:{rcolor};font-size:12px;font-weight:500;")
 
     @staticmethod
     def _set_prop(widget, name, value):
