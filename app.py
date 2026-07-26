@@ -13,7 +13,7 @@ from pathlib import Path
 from PyQt5.QtCore import Qt, QUrl
 from PyQt5.QtGui import QColor, QDesktopServices, QFont
 from PyQt5.QtWidgets import (
-    QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox,
+    QAbstractItemView, QApplication, QCheckBox, QComboBox,
     QFileDialog, QFrame, QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel,
     QLineEdit, QMainWindow, QMessageBox, QProgressBar, QPushButton,
     QSplitter, QTableWidget, QTableWidgetItem, QTabWidget,
@@ -499,32 +499,22 @@ class MainWindow(QMainWindow):
         lbl.setObjectName("srcLbl")
         lay.addWidget(lbl)
 
-        # Pill dạng nút checkable thay cho radio tròn (khớp prototype).
-        self.rb_file = QPushButton("File PDF")
-        self.rb_dir = QPushButton("Thư mục")
-        for b in (self.rb_file, self.rb_dir):
-            b.setObjectName("pill")
-            b.setCheckable(True)
-            b.setCursor(Qt.PointingHandCursor)
-        self.rb_dir.setChecked(True)
-        grp = QButtonGroup(self)
-        grp.setExclusive(True)
-        grp.addButton(self.rb_file)
-        grp.addButton(self.rb_dir)
-
-        lay.addWidget(self.rb_file)
-        lay.addWidget(self.rb_dir)
-
         self.ed_path = QLineEdit()
         self.ed_path.setObjectName("path")
         self.ed_path.setPlaceholderText("chưa chọn nguồn")
         self.ed_path.setReadOnly(True)
         lay.addWidget(self.ed_path, 1)
 
-        self.btn_browse = QPushButton("Chọn…")
-        self.btn_browse.setCursor(Qt.PointingHandCursor)
-        self.btn_browse.clicked.connect(self.on_browse)
-        lay.addWidget(self.btn_browse)
+        # Hai nút ở cuối hàng — bấm là mở ngay hộp thoại tương ứng.
+        self.btn_pick_file = QPushButton("File PDF")
+        self.btn_pick_dir = QPushButton("Thư mục")
+        for b in (self.btn_pick_file, self.btn_pick_dir):
+            b.setObjectName("pill")
+            b.setCursor(Qt.PointingHandCursor)
+        self.btn_pick_file.clicked.connect(self.on_pick_file)
+        self.btn_pick_dir.clicked.connect(self.on_pick_dir)
+        lay.addWidget(self.btn_pick_file)
+        lay.addWidget(self.btn_pick_dir)
         return box
 
     def _build_estimate_bar(self) -> QWidget:
@@ -532,18 +522,23 @@ class MainWindow(QMainWindow):
         self.lbl_estimate.setObjectName("estBar")
         return self.lbl_estimate
 
-    def on_browse(self):
-        if self.rb_file.isChecked():
-            path, _ = QFileDialog.getOpenFileName(
-                self, "Chọn file PDF", "", "PDF (*.pdf)")
-        else:
-            path = QFileDialog.getExistingDirectory(self, "Chọn thư mục")
-        if not path:
-            return
+    def on_pick_file(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Chọn file PDF", "", "PDF (*.pdf)")
+        if path:
+            self._set_source(path)
+
+    def on_pick_dir(self):
+        path = QFileDialog.getExistingDirectory(self, "Chọn thư mục")
+        if path:
+            self._set_source(path)
+
+    def _set_source(self, path: str):
         self.ed_path.setText(path)
         self.files = pipeline.collect_pdf_files(path)
         if not self.files:
             self.lbl_estimate.setText("Không tìm thấy file PDF nào")
+            self._apply_state()
             return
         self._recount()
 
@@ -741,9 +736,8 @@ class MainWindow(QMainWindow):
             self.btn_connect.setText("Kết nối")
 
         busy = s in (State.RUNNING, State.PAUSING, State.PAUSED)
-        self.btn_browse.setEnabled(not busy)
-        self.rb_file.setEnabled(not busy)
-        self.rb_dir.setEnabled(not busy)
+        self.btn_pick_file.setEnabled(not busy)
+        self.btn_pick_dir.setEnabled(not busy)
         self.cb_strategy.setEnabled(not busy)
         self.chk_correction.setEnabled(not busy)
         self.chk_protect.setEnabled(not busy)
