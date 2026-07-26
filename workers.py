@@ -59,7 +59,23 @@ class OcrWorker(QThread):
     progress = pyqtSignal(int, int, int)  # (đã xong, tổng, số lỗi)
     row_done = pyqtSignal(dict)         # kết quả một file
     state_changed = pyqtSignal(str)     # "running" | "pausing" | "paused"
+    connection_lost = pyqtSignal(str)   # mất kết nối server giữa batch
     finished_all = pyqtSignal(dict)     # tổng kết + đường dẫn file
+
+    @staticmethod
+    def _is_conn_error(e) -> bool:
+        """Lỗi có phải do mất kết nối server không (để tạm dừng + hỏi kết nối lại)."""
+        try:
+            import openai
+            if isinstance(e, (openai.APIConnectionError, openai.APITimeoutError)):
+                return True
+        except Exception:
+            pass
+        msg = str(e).lower()
+        return any(s in msg for s in (
+            "connection error", "connection refused", "connection aborted",
+            "timed out", "timeout", "max retries", "failed to establish",
+            "no route to host", "name or service not known"))
 
     def __init__(self, files, fields, cfg, model_name, parent=None):
         super().__init__(parent)
@@ -198,20 +214,28 @@ class OcrWorker(QThread):
 
             except Exception as e:
                 self.errors += 1
-                consecutive_errors += 1
                 msg = str(e)
                 self.log.emit("error", f"{path.name} — {msg}")
                 if self.writer:
                     self.writer.append_error(path.name, msg)
                 self.row_done.emit({"name": path.name, "error": msg})
 
-                if consecutive_errors >= limit:
-                    self.log.emit(
-                        "error",
-                        f"{consecutive_errors} file lỗi liên tiếp — tự tạm dừng. "
-                        "Kiểm tra server rồi bấm Tiếp tục.")
+                if self._is_conn_error(e):
+                    # Mất kết nối server → tạm dừng NGAY (chỉ hỏng 1 file) và
+                    # để UI hỏi kết nối lại; thành công thì bấm Tiếp tục.
+                    self.log.emit("warn", "mất kết nối server — tạm dừng batch")
                     self._resume.clear()
                     consecutive_errors = 0
+                    self.connection_lost.emit(msg)
+                else:
+                    consecutive_errors += 1
+                    if consecutive_errors >= limit:
+                        self.log.emit(
+                            "error",
+                            f"{consecutive_errors} file lỗi liên tiếp — tự tạm dừng. "
+                            "Kiểm tra server rồi bấm Tiếp tục.")
+                        self._resume.clear()
+                        consecutive_errors = 0
 
             finally:
                 self.done += 1

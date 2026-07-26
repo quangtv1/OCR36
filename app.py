@@ -13,7 +13,7 @@ from pathlib import Path
 from PyQt5.QtCore import Qt, QUrl
 from PyQt5.QtGui import QColor, QDesktopServices, QFont
 from PyQt5.QtWidgets import (
-    QAbstractItemView, QApplication, QCheckBox, QComboBox,
+    QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog,
     QFileDialog, QFrame, QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel,
     QLineEdit, QMainWindow, QMessageBox, QProgressBar, QPushButton,
     QSplitter, QTableWidget, QTableWidgetItem, QTabWidget,
@@ -446,13 +446,21 @@ class ResultsTab(QWidget):
 
         hh = self.table.horizontalHeader()
         hh.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)   # canh trái header
+        hh.setSectionResizeMode(QHeaderView.Interactive)         # kéo thả chỉnh rộng
+        hh.setStretchLastSection(False)
         hh.setDefaultSectionSize(self.COL_W)
+        hh.sectionResized.connect(self._on_section_resized)
         self.table.setColumnWidth(0, self.COL_W)
         for c, key in enumerate(self.field_keys, start=1):
             w = (int(self.COL_W * self.TITLE_MULT)
                  if key == "document_title" else self.COL_W)
             self.table.setColumnWidth(c, w)
         root.addWidget(self.table)
+
+    def _on_section_resized(self, *_):
+        # Kéo rộng cột khi đang wrap → tính lại chiều cao hàng cho vừa.
+        if self.chk_wrap.isChecked():
+            self.table.resizeRowsToContents()
 
     # ---- API dùng bởi MainWindow
 
@@ -505,6 +513,62 @@ class ResultsTab(QWidget):
         self.table.resizeRowsToContents()
 
 
+# ==================================================== POPUP KẾT NỐI LẠI
+
+class ReconnectDialog(QDialog):
+    """Hiện khi mất kết nối server giữa batch. Bấm 'Kết nối lại' để thử; thành
+    công thì đóng (UI tiếp tục), thất bại thì báo và giữ tạm dừng."""
+
+    def __init__(self, endpoint, api_key, message, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Mất kết nối server")
+        self.setMinimumWidth(380)
+        self.endpoint = endpoint
+        self.api_key = api_key
+        self._worker = None
+        self.reconnected = False
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(18, 16, 18, 14)
+        lay.setSpacing(12)
+        self.lbl = QLabel(
+            f"Mất kết nối tới server:\n{message}\n\n"
+            "Batch đã tạm dừng. Thử kết nối lại?")
+        self.lbl.setWordWrap(True)
+        lay.addWidget(self.lbl)
+
+        btns = QHBoxLayout()
+        self.btn_pause = QPushButton("Để tạm dừng")
+        self.btn_retry = QPushButton("Kết nối lại")
+        self.btn_retry.setObjectName("pri")
+        for b in (self.btn_pause, self.btn_retry):
+            b.setCursor(Qt.PointingHandCursor)
+        self.btn_pause.clicked.connect(self.reject)
+        self.btn_retry.clicked.connect(self._retry)
+        btns.addStretch(1)
+        btns.addWidget(self.btn_pause)
+        btns.addWidget(self.btn_retry)
+        lay.addLayout(btns)
+
+    def _retry(self):
+        self.btn_retry.setEnabled(False)
+        self.btn_pause.setEnabled(False)
+        self.lbl.setText("Đang thử kết nối lại…")
+        self._worker = ConnectWorker(self.endpoint, self.api_key, parent=self)
+        self._worker.ok.connect(self._ok)
+        self._worker.fail.connect(self._fail)
+        self._worker.start()
+
+    def _ok(self, _model):
+        self.reconnected = True
+        self.accept()
+
+    def _fail(self, msg):
+        self.lbl.setText(f"Vẫn chưa kết nối được:\n{msg}\n\nThử lại?")
+        self.btn_retry.setEnabled(True)
+        self.btn_pause.setEnabled(True)
+
+
 # ==================================================== CỬA SỔ CHÍNH
 
 class MainWindow(QMainWindow):
@@ -518,6 +582,7 @@ class MainWindow(QMainWindow):
         self.last_excel = ""        # xlsx của lần chạy gần nhất (mở bằng "Kết quả")
         self.last_output_dir = ""   # fallback mở thư mục khi không có xlsx
         self._run_output_dir = ""   # thư mục xuất đã resolve của lần chạy
+        self._reconnecting = False  # đang mở popup kết nối lại (tránh mở nhiều)
 
         self.connect_worker: ConnectWorker | None = None
         self.scan_worker: ScanWorker | None = None
@@ -1002,6 +1067,7 @@ class MainWindow(QMainWindow):
         self.ocr_worker.progress.connect(self._on_progress)
         self.ocr_worker.row_done.connect(self.tab_results.add_result)
         self.ocr_worker.state_changed.connect(self._on_worker_state)
+        self.ocr_worker.connection_lost.connect(self._on_connection_lost)
         self.ocr_worker.finished_all.connect(self._on_finished)
         self.ocr_worker.start()
 
@@ -1019,6 +1085,29 @@ class MainWindow(QMainWindow):
             self.ocr_worker.resume()
             self.state = State.RUNNING
             self._apply_state()
+
+    def _on_connection_lost(self, message):
+        """Worker đã tự tạm dừng do mất kết nối. Hỏi kết nối lại; thành công thì
+        tiếp tục batch, không thì để tạm dừng (dùng Tiếp tục/Kết thúc sau)."""
+        if self._reconnecting:
+            return
+        self._reconnecting = True
+        self.state = State.PAUSED
+        self._apply_state()
+
+        dlg = ReconnectDialog(self.cfg["endpoint"], self.cfg["api_key"],
+                              message, self)
+        dlg.exec_()
+        self._reconnecting = False
+
+        if dlg.reconnected and self.ocr_worker and self.ocr_worker.isRunning():
+            self.tab_console.append_log("info", "kết nối lại OK — tiếp tục batch")
+            self.ocr_worker.resume()
+            self.state = State.RUNNING
+            self._apply_state()
+        else:
+            self.tab_console.append_log(
+                "warn", "vẫn tạm dừng — bấm Tiếp tục khi server sẵn sàng")
 
     def on_finish(self):
         if not self.ocr_worker:
