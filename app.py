@@ -89,6 +89,8 @@ def build_stylesheet() -> str:
     QGroupBox QCheckBox:disabled {{ color:{C['tm']}; }}
     QLineEdit#ro {{ background:{C['s1']}; border:none; border-radius:6px;
         padding:5px 7px; font-family:"{MONO}"; font-size:11px; color:{C['tp']}; }}
+    QLineEdit#cfgin {{ font-family:"{MONO}"; font-size:11px; }}
+    QLineEdit:disabled {{ background:{C['s1']}; color:{C['tm']}; }}
 
     QComboBox {{ background:{C['s2']}; border:1px solid {C['line']};
         border-radius:6px; padding:5px 7px; font-size:11px; color:{C['tp']}; }}
@@ -515,6 +517,7 @@ class MainWindow(QMainWindow):
         self.n_pages = 0
         self.last_excel = ""        # xlsx của lần chạy gần nhất (mở bằng "Kết quả")
         self.last_output_dir = ""   # fallback mở thư mục khi không có xlsx
+        self._run_output_dir = ""   # thư mục xuất đã resolve của lần chạy
 
         self.connect_worker: ConnectWorker | None = None
         self.scan_worker: ScanWorker | None = None
@@ -668,11 +671,23 @@ class MainWindow(QMainWindow):
             w.setReadOnly(True)
             return w
 
+        def editable(text):
+            # Ô sửa được (nền trắng, có viền) — khoá khi đang chạy batch.
+            w = QLineEdit(str(text))
+            w.setObjectName("cfgin")
+            return w
+
+        # Các ô sửa được khi chưa chạy (endpoint, DPI, song song, thư mục xuất).
+        self.ed_endpoint = editable(self.cfg["endpoint"])
+        self.ed_dpi = editable(self.cfg["render_dpi"])
+        self.ed_concurrency = editable(self.cfg["concurrency"])
+        self.ed_outdir = editable(self.cfg["output_dir"])
+
         lay.addWidget(QLabel("Endpoint"), r, 0, 1, 2); r += 1
-        lay.addWidget(ro(self.cfg["endpoint"]), r, 0, 1, 2); r += 1
+        lay.addWidget(self.ed_endpoint, r, 0, 1, 2); r += 1
 
         lay.addWidget(QLabel("Model"), r, 0, 1, 2); r += 1
-        self.ed_model = ro("—")
+        self.ed_model = ro("—")      # do server trả về, luôn chỉ đọc
         lay.addWidget(self.ed_model, r, 0, 1, 2); r += 1
 
         lay.addWidget(QLabel("Chiến lược trang"), r, 0, 1, 2); r += 1
@@ -687,11 +702,11 @@ class MainWindow(QMainWindow):
 
         lay.addWidget(QLabel("DPI"), r, 0)
         lay.addWidget(QLabel("Song song"), r, 1); r += 1
-        lay.addWidget(ro(self.cfg["render_dpi"]), r, 0)
-        lay.addWidget(ro(self.cfg["concurrency"]), r, 1); r += 1
+        lay.addWidget(self.ed_dpi, r, 0)
+        lay.addWidget(self.ed_concurrency, r, 1); r += 1
 
         lay.addWidget(QLabel("Thư mục xuất"), r, 0, 1, 2); r += 1
-        lay.addWidget(ro(self.cfg["output_dir"]), r, 0, 1, 2); r += 1
+        lay.addWidget(self.ed_outdir, r, 0, 1, 2); r += 1
 
         line = QFrame()
         line.setFrameShape(QFrame.HLine)
@@ -856,6 +871,11 @@ class MainWindow(QMainWindow):
         self.cb_strategy.setEnabled(not busy)
         self.chk_correction.setEnabled(not busy)
         self.chk_protect.setEnabled(not busy)
+
+        # Ô cài đặt sửa được khi chưa chạy; Endpoint chỉ đổi khi đã ngắt kết nối.
+        for w in (self.ed_dpi, self.ed_concurrency, self.ed_outdir):
+            w.setEnabled(not busy)
+        self.ed_endpoint.setEnabled(s in (State.DISCONNECTED, State.CONNECTING))
         self.tab_meta.set_edit_allowed(
             not busy, "Không sửa được metadata khi đang chạy — Kết thúc batch trước")
 
@@ -883,14 +903,39 @@ class MainWindow(QMainWindow):
         widget.style().unpolish(widget)
         widget.style().polish(widget)
 
+    @staticmethod
+    def _int_field(widget, default, lo=None, hi=None):
+        """Đọc số nguyên từ ô cài đặt; gõ sai thì về mặc định, kẹp trong [lo,hi]."""
+        try:
+            v = int(str(widget.text()).strip())
+        except (ValueError, TypeError):
+            v = int(default)
+        if lo is not None:
+            v = max(lo, v)
+        if hi is not None:
+            v = min(hi, v)
+        widget.setText(str(v))       # chuẩn hoá lại hiển thị
+        return v
+
+    def _resolved_output_dir(self) -> str:
+        raw = self.ed_outdir.text().strip() or str(self.cfg["output_dir"])
+        p = Path(raw)
+        return str(p if p.is_absolute() else (APP_DIR / p))
+
     # ------------------------------------------------ hành động
 
     def on_connect(self):
+        endpoint = self.ed_endpoint.text().strip()
+        if not endpoint:
+            QMessageBox.warning(self, "Thiếu endpoint",
+                                "Nhập địa chỉ endpoint server trước khi kết nối.")
+            return
+        self.cfg["endpoint"] = endpoint      # ghi nhớ giá trị vừa sửa cho phiên
         self.state = State.CONNECTING
         self._apply_state()
-        self.tab_console.append_log("info", f"kết nối {self.cfg['endpoint']}…")
+        self.tab_console.append_log("info", f"kết nối {endpoint}…")
         self.connect_worker = ConnectWorker(
-            self.cfg["endpoint"], self.cfg["api_key"], parent=self)
+            endpoint, self.cfg["api_key"], parent=self)
         self.connect_worker.ok.connect(self._on_connect_ok)
         self.connect_worker.fail.connect(self._on_connect_fail)
         self.connect_worker.start()
@@ -932,7 +977,12 @@ class MainWindow(QMainWindow):
 
         cfg = dict(self.cfg)
         cfg["page_strategy"] = self.cb_strategy.currentData()
-        cfg["output_dir"] = str(APP_DIR / self.cfg["output_dir"])
+        cfg["render_dpi"] = self._int_field(self.ed_dpi, self.cfg["render_dpi"],
+                                            lo=50, hi=600)
+        cfg["concurrency"] = self._int_field(
+            self.ed_concurrency, self.cfg["concurrency"], lo=1, hi=64)
+        cfg["output_dir"] = self._resolved_output_dir()
+        self._run_output_dir = cfg["output_dir"]     # để _export_excel dùng lại
         cfg["use_correction"] = self.chk_correction.isChecked()
         cfg["protect_proper_nouns"] = self.chk_protect.isChecked()
         if not cfg.get("protect_proper_nouns"):
@@ -1017,7 +1067,8 @@ class MainWindow(QMainWindow):
 
         # Lưu đường dẫn để nút "Kết quả" mở; không còn popup hoàn tất.
         self.last_excel = stats.get("excel", "")
-        self.last_output_dir = str(Path(APP_DIR / self.cfg["output_dir"]))
+        self.last_output_dir = self._run_output_dir or str(
+            Path(APP_DIR / self.cfg["output_dir"]))
         self.tab_console.append_log(
             "info", f"đã xuất Excel: {Path(self.last_excel).name}"
             if self.last_excel else "không có Excel — mở thư mục để lấy TSV")
@@ -1039,7 +1090,7 @@ class MainWindow(QMainWindow):
         Chạy trên UI thread nên hỏi được người dùng. Đọc TSV vài trăm dòng
         rồi ghi xlsx chỉ mất vài chục ms, không cần thread riêng.
         """
-        out_dir = Path(APP_DIR / self.cfg["output_dir"])
+        out_dir = Path(self._run_output_dir or (APP_DIR / self.cfg["output_dir"]))
         target = pipeline.excel_target(
             out_dir, self.ed_path.text(), self.cfg.get("excel_base_name"))
 
