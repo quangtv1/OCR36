@@ -177,7 +177,14 @@ class OcrWorker(QThread):
 
             try:
                 n = pipeline.pdf_page_count(path)
-                self.log.emit("info", f"{path.name} · {n} trang")
+                strat = cfg["page_strategy"]
+                if n <= 1 or strat == "first":
+                    pages_desc = "trang 1"
+                elif strat == "full":
+                    pages_desc = f"full {n} trang"
+                else:                       # first_last
+                    pages_desc = f"trang 1 + {n}"
+                self.log.emit("info", f"{path.name} · xử lý {pages_desc}")
 
                 result = pipeline.process_pdf(
                     path, self.fields, client, self.model_name, cfg,
@@ -193,11 +200,8 @@ class OcrWorker(QThread):
                     f"~{kb} KB base64 · {len(field_keys)} trường")
 
                 data = result["data"]
-                summary = "\t".join(
-                    str(data.get(k, "") or "—")
-                    for k in field_keys[:3]
-                )
-                self.log.emit("data", summary)
+                # Chỉ báo ngắn gọn đã có kết quả, không in chi tiết nội dung.
+                self.log.emit("info", f"{path.name} · trả về kết quả")
 
                 empties = [k for k in field_keys if pipeline.is_empty(data.get(k))]
                 for k in empties:

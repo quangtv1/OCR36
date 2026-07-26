@@ -192,7 +192,7 @@ class ConsoleTab(QTextEdit):
         super().__init__(parent)
         self.setObjectName("console")
         self.setReadOnly(True)
-        self.setLineWrapMode(QTextEdit.NoWrap)
+        self.setLineWrapMode(QTextEdit.WidgetWidth)   # luôn wrap theo bề rộng
         # Giới hạn số dòng để batch lớn (hàng vạn file) không phình bộ nhớ.
         self.document().setMaximumBlockCount(5000)
         f = QFont(MONO, 10)
