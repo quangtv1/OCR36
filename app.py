@@ -727,9 +727,14 @@ class MainWindow(QMainWindow):
         self.bar.setObjectName("prog")
         self.bar.setTextVisible(False)
         self.bar.setFixedHeight(6)
-        # Bề rộng bar set động (_sync_bar_width): mép phải thẳng nút "Thư mục".
+        # Bề rộng bar set động (_sync_bar_width): mép phải thẳng ô đường dẫn nguồn.
         self.bar.setProperty("hold", False)
         lay.addWidget(self.bar)
+
+        # x/y (· z lỗi) ngay sau bar — quét: đã đếm/tổng; chạy: xong/tổng.
+        self.lbl_count = QLabel("")
+        self.lbl_count.setObjectName("count")
+        lay.addWidget(self.lbl_count)
 
         lay.addStretch(1)
         return box
@@ -776,6 +781,7 @@ class MainWindow(QMainWindow):
 
     def _on_scan_progress(self, counted, total):
         self._scan_msg = f"Đang quét… {counted}/{total} file"
+        self.lbl_count.setText(f"{counted}/{total}")   # x/y ngay sau bar
         self._refresh_run_label()
 
     def _on_scan_done(self, files, counts, n_pages):
@@ -963,11 +969,6 @@ class MainWindow(QMainWindow):
 
         lay.addStretch(1)
 
-        # Thành công/lỗi bên phải, trước cụm nút.
-        self.lbl_count = QLabel("")
-        self.lbl_count.setObjectName("count")
-        lay.addWidget(self.lbl_count)
-
         self.btn_start = QPushButton("Bắt đầu")
         self.btn_pause = QPushButton("Tạm dừng")
         self.btn_resume = QPushButton("Tiếp tục")
@@ -1137,12 +1138,12 @@ class MainWindow(QMainWindow):
         widget.style().polish(widget)
 
     def _sync_bar_width(self):
-        """Đặt bề rộng progress bar để mép PHẢI thẳng với mép phải nút 'Thư mục'
-        (mép phải ngoài cùng của hàng Nguồn)."""
-        if not hasattr(self, "bar") or not hasattr(self, "btn_pick_dir"):
+        """Đặt bề rộng progress bar để mép PHẢI thẳng với mép phải ô đường dẫn
+        nguồn bên trên (chừa chỗ sau bar cho x/y · z lỗi)."""
+        if not hasattr(self, "bar") or not hasattr(self, "ed_path"):
             return
-        right = self.btn_pick_dir.mapTo(
-            self, self.btn_pick_dir.rect().topRight()).x()
+        right = self.ed_path.mapTo(
+            self, self.ed_path.rect().topRight()).x()
         bar_left = self.bar.mapTo(self, self.bar.rect().topLeft()).x()
         w = right - bar_left
         if w > 80:
@@ -1340,7 +1341,7 @@ class MainWindow(QMainWindow):
         self.bar.setValue(done)
         txt = f"{done}/{total}"
         if errors:
-            txt += f" · lỗi {errors}"
+            txt += f" · {errors} lỗi"
         self.lbl_count.setText(txt)
 
     def _on_worker_state(self, name):
@@ -1363,9 +1364,9 @@ class MainWindow(QMainWindow):
         total = max(1, stats.get("total", 1))
         self.bar.setRange(0, total)
         self.bar.setValue(stats.get("ok", 0))
-        # Thành công / lỗi ở cuối thanh trên.
+        # x/y · z lỗi ngay sau bar (bỏ chữ "thành công" — x/y đã tự hiểu).
         self.lbl_count.setText(
-            f"{stats.get('ok', 0)}/{stats.get('total', 0)} thành công"
+            f"{stats.get('ok', 0)}/{stats.get('total', 0)}"
             + (f" · {stats.get('fail', 0)} lỗi" if stats.get("fail") else ""))
         secs = stats.get("elapsed", 0)
         self._last_elapsed = secs        # tổng thời gian thực (thanh dưới)
