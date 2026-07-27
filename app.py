@@ -80,10 +80,11 @@ def build_stylesheet() -> str:
     QFrame#estBar {{ background:{C['s1']}; border:none;
         border-bottom:1px solid {C['line']}; }}
     QLabel#estText {{ color:{C['ts']}; font-family:"{MONO}"; font-size:11px; }}
-    QProgressBar#prog {{ background:{C['s0']}; border:1px solid {C['line']};
-        border-radius:5px; min-height:9px; max-height:9px; }}
-    QProgressBar#prog::chunk {{ background:{C['acc']}; border-radius:4px; }}
-    QProgressBar#prog[hold="true"]::chunk {{ background:{C['tm']}; }}
+    QProgressBar#prog {{ background:{C['s0']}; border:none;
+        border-radius:3px; min-height:6px; max-height:6px; }}
+    QProgressBar#prog::chunk {{ background:rgba(24,95,165,0.45);
+        border-radius:3px; }}
+    QProgressBar#prog[hold="true"]::chunk {{ background:rgba(156,154,146,0.45); }}
 
     /* panel cài đặt */
     QGroupBox {{ background:{C['s2']}; border:none;
@@ -724,7 +725,7 @@ class MainWindow(QMainWindow):
         self.bar = QProgressBar()
         self.bar.setObjectName("prog")
         self.bar.setTextVisible(False)
-        self.bar.setFixedHeight(9)
+        self.bar.setFixedHeight(6)
         self.bar.setProperty("hold", False)
         lay.addWidget(self.bar, 1)
 
