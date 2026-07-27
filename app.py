@@ -12,12 +12,12 @@ from enum import Enum, auto
 from pathlib import Path
 
 from PyQt5.QtCore import Qt, QUrl, pyqtSignal
-from PyQt5.QtGui import QColor, QDesktopServices, QFont
+from PyQt5.QtGui import QColor, QDesktopServices, QFont, QKeySequence
 from PyQt5.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog,
     QFileDialog, QFrame, QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel,
     QLineEdit, QMainWindow, QMessageBox, QProgressBar, QPushButton,
-    QSplitter, QTableWidget, QTableWidgetItem, QTabWidget,
+    QShortcut, QSplitter, QTableWidget, QTableWidgetItem, QTabWidget,
     QTextEdit, QVBoxLayout, QWidget,
 )
 
@@ -114,9 +114,12 @@ def build_stylesheet() -> str:
 
     /* bảng */
     QTableWidget {{ background:{C['s2']}; border:none; gridline-color:transparent;
-        font-size:12px; selection-background-color:{C['acc_bg']};
-        selection-color:{C['tp']}; }}
+        font-size:12px; outline:none;
+        selection-background-color:{C['s0']}; selection-color:{C['tp']}; }}
     QTableWidget::item {{ padding:4px 8px; border-bottom:1px solid {C['line']}; }}
+    /* Chọn = nền xám nhạt (không sáng), giữ nguyên màu chữ để đọc/copy. */
+    QTableWidget::item:selected {{ background:{C['s0']}; color:{C['tp']}; }}
+    QTableWidget::item:focus {{ outline:none; }}
     QHeaderView::section {{ background:{C['s1']}; color:{C['ts']}; border:none;
         border-bottom:1px solid {C['line']}; padding:6px 10px;
         font-size:11px; font-weight:400; }}
@@ -471,6 +474,24 @@ class ResultsTab(QWidget):
                  if key == "document_title" else self.COL_W)
             self.table.setColumnWidth(c, w)
         root.addWidget(self.table)
+
+        # Cho phép chọn ô rồi Ctrl+C để copy text (như bảng trên web).
+        sc = QShortcut(QKeySequence.Copy, self.table)
+        sc.activated.connect(self._copy_selection)
+
+    def _copy_selection(self):
+        rng = self.table.selectedRanges()
+        if not rng:
+            return
+        r = rng[0]
+        lines = []
+        for row in range(r.topRow(), r.bottomRow() + 1):
+            cells = []
+            for col in range(r.leftColumn(), r.rightColumn() + 1):
+                it = self.table.item(row, col)
+                cells.append(it.text() if it else "")
+            lines.append("\t".join(cells))
+        QApplication.clipboard().setText("\n".join(lines))
 
     def _on_section_resized(self, *_):
         # Kéo rộng cột khi đang wrap → tính lại chiều cao hàng cho vừa.
