@@ -81,8 +81,8 @@ def build_stylesheet() -> str:
         border-bottom:1px solid {C['line']}; }}
     QLabel#estText {{ color:{C['ts']}; font-family:"{MONO}"; font-size:11px; }}
     QProgressBar#prog {{ background:{C['s0']}; border:1px solid {C['line']};
-        border-radius:7px; min-height:14px; max-height:14px; }}
-    QProgressBar#prog::chunk {{ background:{C['acc']}; border-radius:6px; }}
+        border-radius:5px; min-height:9px; max-height:9px; }}
+    QProgressBar#prog::chunk {{ background:{C['acc']}; border-radius:4px; }}
     QProgressBar#prog[hold="true"]::chunk {{ background:{C['tm']}; }}
 
     /* panel cài đặt */
@@ -629,6 +629,7 @@ class MainWindow(QMainWindow):
         self._current_file = ""     # tên PDF đang xử lý
         self._file_t0 = 0.0         # mốc thời gian file hiện tại (đếm giây)
         self._tick_count = 0        # đếm nhịp để nhấp nháy icon chậm
+        self._last_elapsed = 0.0    # tổng thời gian chạy của batch vừa xong
 
         self.connect_worker: ConnectWorker | None = None
         self.scan_worker: ScanWorker | None = None
@@ -709,23 +710,27 @@ class MainWindow(QMainWindow):
         return box
 
     def _build_estimate_bar(self) -> QWidget:
-        # Hàng thông tin: [progress bar pill] + [số file · trang · phút] bên phải.
+        # Hàng tiến trình: [Tiến trình] [progress bar] [x/y] ngay sau bar.
         box = QFrame()
         box.setObjectName("estBar")
         lay = QHBoxLayout(box)
-        lay.setContentsMargins(12, 7, 12, 7)
-        lay.setSpacing(12)
+        lay.setContentsMargins(12, 6, 12, 6)
+        lay.setSpacing(10)
+
+        lbl = QLabel("Tiến trình")
+        lbl.setObjectName("estText")
+        lay.addWidget(lbl)
 
         self.bar = QProgressBar()
         self.bar.setObjectName("prog")
         self.bar.setTextVisible(False)
-        self.bar.setFixedHeight(14)
+        self.bar.setFixedHeight(9)
         self.bar.setProperty("hold", False)
         lay.addWidget(self.bar, 1)
 
-        self.lbl_estimate = QLabel("Chưa chọn nguồn")
-        self.lbl_estimate.setObjectName("estText")
-        lay.addWidget(self.lbl_estimate)
+        self.lbl_count = QLabel("")       # x/y ngay sau progress bar
+        self.lbl_count.setObjectName("count")
+        lay.addWidget(self.lbl_count)
         return box
 
     def on_pick_file(self):
@@ -775,10 +780,10 @@ class MainWindow(QMainWindow):
         self.files = list(files)
         self.page_counts = list(counts)
         self.n_pages = n_pages
-        self.lbl_count.setText("")       # x/y để dưới khi chạy; số file ở trên
-        # Reset progress bar về 0 theo số file mới.
+        # Reset progress bar + x/y (trên) về 0 theo số file mới.
         self.bar.setRange(0, max(1, len(self.files)))
         self.bar.setValue(0)
+        self.lbl_count.setText(f"0/{len(self.files)}" if self.files else "")
         if not self.files:
             self.lbl_estimate.setText("Không tìm thấy file PDF nào")
             self._log("warn", "quét xong — không tìm thấy file PDF")
@@ -788,12 +793,30 @@ class MainWindow(QMainWindow):
                               f"{self.n_pages:,} trang".replace(",", "."))
         self._apply_state()
 
-    def _update_estimate_label(self):
+    @staticmethod
+    def _fmt_dur(secs) -> str:
+        secs = int(secs)
+        if secs < 60:
+            return f"{secs}s"
+        return f"{secs // 60}p{secs % 60:02d}s"
+
+    def _info_text(self) -> str:
+        """'x file · y trang · thời gian' — thời gian là ước lượng khi chưa chạy,
+        là thời gian thực tế khi đang chạy / đã xong."""
+        if not self.files:
+            return "Chưa chọn nguồn"
+        pages = f"{self.n_pages:,}".replace(",", ".")
+        base = f"{len(self.files)} file · {pages} trang"
+        if self.state == State.RUNNING and self._run_started:
+            return f"{base} · {self._fmt_dur(time.monotonic() - self._run_started)}"
+        if self.state == State.DONE and self._last_elapsed:
+            return f"{base} · {self._fmt_dur(self._last_elapsed)}"
         spp = self.cfg.get("seconds_per_page", 0.5)
         mins = max(1, round(self.n_pages * spp / 60))
-        self.lbl_estimate.setText(
-            f"{len(self.files)} file · {self.n_pages:,} trang · ~{mins} phút"
-            .replace(",", "."))
+        return f"{base} · ~{mins} phút"
+
+    def _update_estimate_label(self):
+        self.lbl_estimate.setText(self._info_text())
 
     def _recompute_estimate(self):
         """Đổi chiến lược trang: tính lại từ số trang đã cache — KHÔNG mở lại PDF."""
@@ -950,17 +973,16 @@ class MainWindow(QMainWindow):
         lay.setContentsMargins(12, 10, 12, 10)
         lay.setSpacing(10)
 
-        # Mô tả tiến trình + tên file đang xử lý + đồng hồ giây (bên trái).
-        # Progress bar đã chuyển lên thanh trên cùng.
+        # Trạng thái + tên file (khi chạy), rồi 'x file · y trang · thời gian'.
         self.lbl_run = QLabel("")
         self.lbl_run.setTextFormat(Qt.RichText)
         lay.addWidget(self.lbl_run)
 
-        lay.addStretch(1)
+        self.lbl_estimate = QLabel("Chưa chọn nguồn")
+        self.lbl_estimate.setObjectName("estText")
+        lay.addWidget(self.lbl_estimate)
 
-        self.lbl_count = QLabel("")
-        self.lbl_count.setObjectName("count")
-        lay.addWidget(self.lbl_count)
+        lay.addStretch(1)
 
         self.btn_start = QPushButton("Bắt đầu")
         self.btn_pause = QPushButton("Tạm dừng")
@@ -1061,6 +1083,9 @@ class MainWindow(QMainWindow):
     def _on_tick(self):
         self._tick_count += 1
         self._refresh_run_label()
+        # Cập nhật 'thời gian thực hiện' đang chạy ở thanh dưới.
+        if self.state == State.RUNNING:
+            self.lbl_estimate.setText(self._info_text())
 
     def _on_file_started(self, name):
         self._current_file = name
@@ -1286,16 +1311,9 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------ tín hiệu worker
 
     def _on_progress(self, done, total, errors):
+        # x/y ngay sau progress bar (thời gian đã dời xuống thanh dưới).
         self.bar.setValue(done)
         txt = f"{done}/{total}"
-        # ETA tính từ tốc độ thực tế (thời gian đã chạy / số file đã xong).
-        if done > 0 and self._run_started and done < total:
-            per = (time.monotonic() - self._run_started) / done
-            remain = per * (total - done)
-            if remain >= 60:
-                txt += f" · còn ~{round(remain / 60)} phút"
-            else:
-                txt += f" · còn ~{max(1, round(remain))}s"
         if errors:
             txt += f" · lỗi {errors}"
         self.lbl_count.setText(txt)
@@ -1315,6 +1333,7 @@ class MainWindow(QMainWindow):
 
     def _on_finished(self, stats: dict):
         self._current_file = ""          # dừng đồng hồ file
+        self.state = State.DONE          # đặt sớm để _info_text dùng thời gian thực
         # Giữ progress bar ở mức số file THÀNH CÔNG (100% nếu không lỗi).
         total = max(1, stats.get("total", 1))
         self.bar.setRange(0, total)
@@ -1323,6 +1342,8 @@ class MainWindow(QMainWindow):
             f"{stats.get('ok', 0)}/{stats.get('total', 0)} thành công"
             + (f" · {stats.get('fail', 0)} lỗi" if stats.get("fail") else ""))
         secs = stats.get("elapsed", 0)
+        self._last_elapsed = secs        # để '_info_text' hiện thời gian thực
+        self.lbl_estimate.setText(self._info_text())
         if stats.get("ok") and secs:
             pages = max(self.n_pages, 1)
             self.cfg["seconds_per_page"] = round(secs / pages, 3)
