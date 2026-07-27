@@ -164,6 +164,11 @@ def build_stylesheet() -> str:
         border-radius:3px; max-height:5px; }}
     QProgressBar::chunk {{ background:{C['acc']}; border-radius:3px; }}
     QProgressBar[hold="true"]::chunk {{ background:{C['tm']}; }}
+    /* Thanh tiến trình mảnh trên cùng (full-width, vuông cạnh). */
+    QProgressBar#topbar {{ background:{C['s0']}; border:none; border-radius:0;
+        min-height:4px; max-height:4px; }}
+    QProgressBar#topbar::chunk {{ background:{C['acc']}; border-radius:0; }}
+    QProgressBar#topbar[hold="true"]::chunk {{ background:{C['tm']}; }}
 
     /* splitter */
     QSplitter::handle:horizontal {{ background:{C['line']}; width:1px; }}
@@ -607,6 +612,9 @@ class MainWindow(QMainWindow):
         self._conn_lost = False     # mất kết nối server giữa batch (đồng bộ status)
         self._wanted_model = ""     # model do người dùng chỉ định (endpoint ngoài)
         self._run_started = 0.0     # mốc thời gian bắt đầu batch (ETA thực tế)
+        self._current_file = ""     # tên PDF đang xử lý
+        self._file_t0 = 0.0         # mốc thời gian file hiện tại (đếm giây)
+        self._tick_count = 0        # đếm nhịp để nhấp nháy icon chậm
 
         self.connect_worker: ConnectWorker | None = None
         self.scan_worker: ScanWorker | None = None
@@ -623,6 +631,14 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
+        # Thanh tiến trình mảnh ở TRÊN CÙNG (full-width, cân đối), chỉ hiện khi chạy.
+        self.bar = QProgressBar()
+        self.bar.setObjectName("topbar")
+        self.bar.setTextVisible(False)
+        self.bar.setFixedHeight(4)
+        self.bar.setProperty("hold", False)
+        root.addWidget(self.bar)
+
         root.addWidget(self._build_source_bar())
         root.addWidget(self._build_estimate_bar())
 
@@ -637,6 +653,11 @@ class MainWindow(QMainWindow):
         root.addWidget(split, 1)
 
         root.addWidget(self._build_action_bar())
+
+        # Nhịp 500ms: cập nhật đồng hồ giây file hiện tại + nhấp nháy icon chậm.
+        self._tick = QTimer(self)
+        self._tick.setInterval(500)
+        self._tick.timeout.connect(self._on_tick)
 
         self._apply_state()
 
@@ -905,22 +926,17 @@ class MainWindow(QMainWindow):
         lay.setContentsMargins(12, 10, 12, 10)
         lay.setSpacing(10)
 
-        # Mô tả tiến trình (Đang chạy / Tạm dừng / Đã xong) bên trái thanh dưới.
+        # Mô tả tiến trình + tên file đang xử lý + đồng hồ giây (bên trái).
+        # Progress bar đã chuyển lên thanh trên cùng.
         self.lbl_run = QLabel("")
+        self.lbl_run.setTextFormat(Qt.RichText)
         lay.addWidget(self.lbl_run)
 
-        self.bar = QProgressBar()
-        self.bar.setTextVisible(False)
-        self.bar.setFixedHeight(5)
-        self.bar.setProperty("hold", False)
-        lay.addWidget(self.bar, 3)      # chiếm phần lớn bề rộng còn lại
+        lay.addStretch(1)
 
         self.lbl_count = QLabel("")
         self.lbl_count.setObjectName("count")
         lay.addWidget(self.lbl_count)
-
-        # Đẩy cụm nút sang phải (giống margin-left:auto ở prototype).
-        lay.addStretch(1)
 
         self.btn_start = QPushButton("Bắt đầu")
         self.btn_pause = QPushButton("Tạm dừng")
@@ -1007,17 +1023,50 @@ class MainWindow(QMainWindow):
         self.lbl_conn.setStyleSheet(
             f"color:{ccolor};font-size:11px;font-weight:500;")
 
-        # Mô tả tiến trình bên trái thanh dưới (chỉ khi đang chạy / xong).
-        run_map = {
-            State.RUNNING: ("● Đang chạy", C["ok"]),
-            State.PAUSING: ("● Đang tạm dừng…", C["warn"]),
-            State.PAUSED: ("● Đã tạm dừng", C["warn"]),
-            State.DONE: ("✓ Đã xong", C["ok"]),
-        }
-        rtext, rcolor = run_map.get(s, ("", C["ts"]))
-        self.lbl_run.setText(rtext)
-        self.lbl_run.setStyleSheet(
-            f"color:{rcolor};font-size:12px;font-weight:500;")
+        # Nhịp đếm giây + nhấp nháy icon chỉ chạy khi đang RUNNING.
+        if s == State.RUNNING:
+            if not self._tick.isActive():
+                self._tick.start()
+        else:
+            self._tick.stop()
+        self._refresh_run_label()
+
+    def _on_tick(self):
+        self._tick_count += 1
+        self._refresh_run_label()
+
+    def _on_file_started(self, name):
+        self._current_file = name
+        self._file_t0 = time.monotonic()
+        self._refresh_run_label()
+
+    def _refresh_run_label(self):
+        """Mô tả tiến trình ở thanh dưới: icon nhấp nháy chậm + tên file + giây."""
+        s = self.state
+        ok, warn = C["ok"], C["warn"]
+        if s == State.RUNNING:
+            blink_on = (self._tick_count // 2) % 2 == 0      # 1s sáng / 1s mờ
+            dot = ok if blink_on else "#bfe0d5"
+            html = (f'<span style="color:{dot};font-size:9px">●</span> '
+                    f'<span style="color:{ok};font-weight:600">Đang chạy</span>')
+            if self._current_file:
+                secs = int(time.monotonic() - self._file_t0) if self._file_t0 else 0
+                name = (self._current_file.replace("&", "&amp;")
+                        .replace("<", "&lt;").replace(">", "&gt;"))
+                html += (f'<span style="color:{C["ts"]}"> · {name} · '
+                         f'{secs}s</span>')
+            self.lbl_run.setText(html)
+        elif s == State.PAUSING:
+            self.lbl_run.setText(
+                f'<span style="color:{warn};font-weight:600">● Đang tạm dừng…</span>')
+        elif s == State.PAUSED:
+            self.lbl_run.setText(
+                f'<span style="color:{warn};font-weight:600">● Đã tạm dừng</span>')
+        elif s == State.DONE:
+            self.lbl_run.setText(
+                f'<span style="color:{ok};font-weight:600">✓ Đã xong</span>')
+        else:
+            self.lbl_run.setText("")
 
     @staticmethod
     def _set_prop(widget, name, value):
@@ -1143,8 +1192,11 @@ class MainWindow(QMainWindow):
         self.ocr_worker.progress.connect(self._on_progress)
         self.ocr_worker.row_done.connect(self.tab_results.add_result)
         self.ocr_worker.state_changed.connect(self._on_worker_state)
+        self.ocr_worker.file_started.connect(self._on_file_started)
         self.ocr_worker.connection_lost.connect(self._on_connection_lost)
         self.ocr_worker.finished_all.connect(self._on_finished)
+        self._current_file = ""
+        self._file_t0 = 0.0
         self.ocr_worker.start()
 
         self.state = State.RUNNING
@@ -1235,6 +1287,7 @@ class MainWindow(QMainWindow):
             self._apply_state()
 
     def _on_finished(self, stats: dict):
+        self._current_file = ""          # dừng đồng hồ file
         secs = stats.get("elapsed", 0)
         if stats.get("ok") and secs:
             pages = max(self.n_pages, 1)

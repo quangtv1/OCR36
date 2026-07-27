@@ -59,6 +59,7 @@ class OcrWorker(QThread):
     progress = pyqtSignal(int, int, int)  # (đã xong, tổng, số lỗi)
     row_done = pyqtSignal(dict)         # kết quả một file
     state_changed = pyqtSignal(str)     # "running" | "pausing" | "paused"
+    file_started = pyqtSignal(str)      # tên file bắt đầu xử lý
     connection_lost = pyqtSignal(str)   # mất kết nối server giữa batch
     finished_all = pyqtSignal(dict)     # tổng kết + đường dẫn file
 
@@ -182,6 +183,7 @@ class OcrWorker(QThread):
                 self.state_changed.emit("running")
 
             try:
+                self.file_started.emit(path.name)
                 n = pipeline.pdf_page_count(path)
                 strat = cfg["page_strategy"]
                 if n <= 1 or strat == "first":
