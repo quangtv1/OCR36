@@ -689,7 +689,7 @@ class MainWindow(QMainWindow):
         lay.setContentsMargins(12, 10, 12, 10)
         lay.setSpacing(8)
 
-        lbl = QLabel("Nguồn")
+        lbl = QLabel("Nguồn file")
         lbl.setObjectName("srcLbl")
         lay.addWidget(lbl)
 
