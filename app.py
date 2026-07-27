@@ -82,9 +82,8 @@ def build_stylesheet() -> str:
     QLabel#estText {{ color:{C['ts']}; font-family:"{MONO}"; font-size:11px; }}
     QProgressBar#prog {{ background:{C['s0']}; border:none;
         border-radius:3px; min-height:6px; max-height:6px; }}
-    QProgressBar#prog::chunk {{ background:rgba(24,95,165,0.45);
-        border-radius:3px; }}
-    QProgressBar#prog[hold="true"]::chunk {{ background:rgba(156,154,146,0.45); }}
+    QProgressBar#prog::chunk {{ background:{C['acc']}; border-radius:3px; }}
+    QProgressBar#prog[hold="true"]::chunk {{ background:{C['tm']}; }}
 
     /* panel cài đặt */
     QGroupBox {{ background:{C['s2']}; border:none;
