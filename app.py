@@ -162,9 +162,9 @@ def build_stylesheet() -> str:
         border-radius:3px; max-height:5px; }}
     QProgressBar::chunk {{ background:{C['acc']}; border-radius:3px; }}
     QProgressBar[hold="true"]::chunk {{ background:{C['tm']}; }}
-    /* Thanh tiến trình mảnh trên cùng (full-width, vuông cạnh). */
+    /* Thanh tiến trình mảnh dưới thanh thông tin (full-width, vuông cạnh). */
     QProgressBar#topbar {{ background:{C['s0']}; border:none; border-radius:0;
-        min-height:4px; max-height:4px; }}
+        min-height:6px; max-height:6px; }}
     QProgressBar#topbar::chunk {{ background:{C['acc']}; border-radius:0; }}
     QProgressBar#topbar[hold="true"]::chunk {{ background:{C['tm']}; }}
 
@@ -645,16 +645,17 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # Thanh tiến trình mảnh ở TRÊN CÙNG (full-width, cân đối), chỉ hiện khi chạy.
+        root.addWidget(self._build_source_bar())
+        root.addWidget(self._build_estimate_bar())
+
+        # Thanh tiến trình mảnh NGAY DƯỚI thanh thông tin (file · trang · phút),
+        # full-width, chỉ hiện khi đang chạy.
         self.bar = QProgressBar()
         self.bar.setObjectName("topbar")
         self.bar.setTextVisible(False)
-        self.bar.setFixedHeight(4)
+        self.bar.setFixedHeight(6)
         self.bar.setProperty("hold", False)
         root.addWidget(self.bar)
-
-        root.addWidget(self._build_source_bar())
-        root.addWidget(self._build_estimate_bar())
 
         split = QSplitter(Qt.Horizontal)
         split.setHandleWidth(1)
