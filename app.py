@@ -76,9 +76,14 @@ def build_stylesheet() -> str:
         border-radius:6px; padding:6px 9px; font-family:"{MONO}";
         font-size:11px; color:{C['tp']}; }}
 
-    /* thanh ước lượng */
-    QLabel#estBar {{ background:{C['s1']}; border-bottom:1px solid {C['line']};
-        color:{C['ts']}; font-family:"{MONO}"; font-size:11px; padding:6px 12px; }}
+    /* thanh ước lượng (progress bar + thông tin) */
+    QFrame#estBar {{ background:{C['s1']}; border:none;
+        border-bottom:1px solid {C['line']}; }}
+    QLabel#estText {{ color:{C['ts']}; font-family:"{MONO}"; font-size:11px; }}
+    QProgressBar#prog {{ background:{C['s0']}; border:1px solid {C['line']};
+        border-radius:7px; min-height:14px; max-height:14px; }}
+    QProgressBar#prog::chunk {{ background:{C['acc']}; border-radius:6px; }}
+    QProgressBar#prog[hold="true"]::chunk {{ background:{C['tm']}; }}
 
     /* panel cài đặt */
     QGroupBox {{ background:{C['s2']}; border:none;
@@ -162,11 +167,6 @@ def build_stylesheet() -> str:
         border-radius:3px; max-height:5px; }}
     QProgressBar::chunk {{ background:{C['acc']}; border-radius:3px; }}
     QProgressBar[hold="true"]::chunk {{ background:{C['tm']}; }}
-    /* Thanh tiến trình mảnh dưới thanh thông tin (full-width, vuông cạnh). */
-    QProgressBar#topbar {{ background:{C['s0']}; border:none; border-radius:0;
-        min-height:6px; max-height:6px; }}
-    QProgressBar#topbar::chunk {{ background:{C['acc']}; border-radius:0; }}
-    QProgressBar#topbar[hold="true"]::chunk {{ background:{C['tm']}; }}
 
     /* splitter */
     QSplitter::handle:horizontal {{ background:{C['line']}; width:1px; }}
@@ -646,16 +646,7 @@ class MainWindow(QMainWindow):
         root.setSpacing(0)
 
         root.addWidget(self._build_source_bar())
-        root.addWidget(self._build_estimate_bar())
-
-        # Thanh tiến trình mảnh NGAY DƯỚI thanh thông tin (file · trang · phút),
-        # full-width, chỉ hiện khi đang chạy.
-        self.bar = QProgressBar()
-        self.bar.setObjectName("topbar")
-        self.bar.setTextVisible(False)
-        self.bar.setFixedHeight(6)
-        self.bar.setProperty("hold", False)
-        root.addWidget(self.bar)
+        root.addWidget(self._build_estimate_bar())   # gồm cả progress bar
 
         split = QSplitter(Qt.Horizontal)
         split.setHandleWidth(1)
@@ -718,9 +709,24 @@ class MainWindow(QMainWindow):
         return box
 
     def _build_estimate_bar(self) -> QWidget:
+        # Hàng thông tin: [progress bar pill] + [số file · trang · phút] bên phải.
+        box = QFrame()
+        box.setObjectName("estBar")
+        lay = QHBoxLayout(box)
+        lay.setContentsMargins(12, 7, 12, 7)
+        lay.setSpacing(12)
+
+        self.bar = QProgressBar()
+        self.bar.setObjectName("prog")
+        self.bar.setTextVisible(False)
+        self.bar.setFixedHeight(14)
+        self.bar.setProperty("hold", False)
+        lay.addWidget(self.bar, 1)
+
         self.lbl_estimate = QLabel("Chưa chọn nguồn")
-        self.lbl_estimate.setObjectName("estBar")
-        return self.lbl_estimate
+        self.lbl_estimate.setObjectName("estText")
+        lay.addWidget(self.lbl_estimate)
+        return box
 
     def on_pick_file(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -769,7 +775,10 @@ class MainWindow(QMainWindow):
         self.files = list(files)
         self.page_counts = list(counts)
         self.n_pages = n_pages
-        self.lbl_count.setText(f"{len(self.files)} file PDF")
+        self.lbl_count.setText("")       # x/y để dưới khi chạy; số file ở trên
+        # Reset progress bar về 0 theo số file mới.
+        self.bar.setRange(0, max(1, len(self.files)))
+        self.bar.setValue(0)
         if not self.files:
             self.lbl_estimate.setText("Không tìm thấy file PDF nào")
             self._log("warn", "quét xong — không tìm thấy file PDF")
@@ -1022,7 +1031,10 @@ class MainWindow(QMainWindow):
         self.tab_meta.set_edit_allowed(
             not busy, "Không sửa được metadata khi đang chạy — Kết thúc batch trước")
 
-        self.bar.setVisible(busy)
+        # Progress bar hiện khi đã có nguồn hoặc đang chạy/đã xong; GIỮ sau khi xong.
+        self.bar.setVisible(
+            has_files or s in (State.RUNNING, State.PAUSING,
+                               State.PAUSED, State.DONE))
         self._set_prop(self.bar, "hold", s in (State.PAUSING, State.PAUSED))
 
         # Trạng thái kết nối (trong panel Cài đặt, dưới nút Kết nối/Ngắt).
@@ -1303,6 +1315,13 @@ class MainWindow(QMainWindow):
 
     def _on_finished(self, stats: dict):
         self._current_file = ""          # dừng đồng hồ file
+        # Giữ progress bar ở mức số file THÀNH CÔNG (100% nếu không lỗi).
+        total = max(1, stats.get("total", 1))
+        self.bar.setRange(0, total)
+        self.bar.setValue(stats.get("ok", 0))
+        self.lbl_count.setText(
+            f"{stats.get('ok', 0)}/{stats.get('total', 0)} thành công"
+            + (f" · {stats.get('fail', 0)} lỗi" if stats.get("fail") else ""))
         secs = stats.get("elapsed", 0)
         if stats.get("ok") and secs:
             pages = max(self.n_pages, 1)
