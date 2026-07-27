@@ -1039,10 +1039,14 @@ class MainWindow(QMainWindow):
             not busy, "Không sửa được metadata khi đang chạy — Kết thúc batch trước")
 
         # Progress bar hiện khi đã có nguồn hoặc đang chạy/đã xong; GIỮ sau khi xong.
-        self.bar.setVisible(
-            has_files or s in (State.RUNNING, State.PAUSING,
-                               State.PAUSED, State.DONE))
+        bar_on = has_files or s in (State.RUNNING, State.PAUSING,
+                                    State.PAUSED, State.DONE)
+        self.bar.setVisible(bar_on)
         self._set_prop(self.bar, "hold", s in (State.PAUSING, State.PAUSED))
+        # Căn lại bề rộng bar mỗi khi nó hiện: singleShot(0) để chạy SAU khi
+        # layout đã ổn định (lúc khởi động _sync ban đầu chạy quá sớm, bị lệch).
+        if bar_on:
+            QTimer.singleShot(0, self._sync_bar_width)
 
         # Trạng thái kết nối (trong panel Cài đặt, dưới nút Kết nối/Ngắt).
         if s == State.DISCONNECTED:
