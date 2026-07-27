@@ -11,13 +11,13 @@ import time
 from enum import Enum, auto
 from pathlib import Path
 
-from PyQt5.QtCore import Qt, QUrl, pyqtSignal
-from PyQt5.QtGui import QColor, QDesktopServices, QFont, QKeySequence
+from PyQt5.QtCore import Qt, QTimer, QUrl, pyqtSignal
+from PyQt5.QtGui import QColor, QDesktopServices, QFont
 from PyQt5.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog,
     QFileDialog, QFrame, QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel,
     QLineEdit, QMainWindow, QMessageBox, QProgressBar, QPushButton,
-    QShortcut, QSplitter, QStyledItemDelegate, QTableWidget, QTableWidgetItem,
+    QSplitter, QTableWidget, QTableWidgetItem,
     QTabWidget, QTextEdit, QVBoxLayout, QWidget,
 )
 
@@ -125,8 +125,10 @@ def build_stylesheet() -> str:
         font-size:11px; font-weight:400; }}
     QTableCornerButton::section {{ background:{C['s1']}; border:none; }}
 
-    /* console */
+    /* console + bảng kết quả (QTextEdit) */
     QTextEdit#console {{ background:{C['s2']}; border:none; padding:6px 10px; }}
+    QTextEdit#resultView {{ background:{C['s2']}; border:none; padding:2px 10px;
+        selection-background-color:{C['s0']}; selection-color:{C['tp']}; }}
 
     /* ô nhập */
     QLineEdit {{ background:{C['s2']}; border:1px solid {C['line']};
@@ -418,27 +420,10 @@ class MetadataTab(QWidget):
 
 # ==================================================== TAB KẾT QUẢ
 
-class SelectableCellDelegate(QStyledItemDelegate):
-    """Mở editor CHỈ-ĐỌC khi double-click ô → chọn/copy text trong ô như bảng
-    web, nhưng không cho sửa giá trị (setModelData bỏ qua)."""
-
-    def createEditor(self, parent, option, index):
-        e = QLineEdit(parent)
-        e.setReadOnly(True)
-        e.setFrame(False)
-        return e
-
-    def setEditorData(self, editor, index):
-        editor.setText(index.data(Qt.DisplayRole) or "")
-        editor.selectAll()
-
-    def setModelData(self, editor, model, index):
-        pass        # không ghi lại → giá trị kết quả giữ nguyên
-
-
 class ResultsTab(QWidget):
-    """Bảng kết quả: cột document_title rộng 1.5×, canh trái mọi cột, có công
-    tắc 'Xuống dòng' để wrap toàn bộ ô."""
+    """Bảng kết quả render bằng HTML trong QTextEdit chỉ-đọc → chọn/kéo/copy
+    text tự do như tab Console. Cột document_title rộng 1.5×, canh trái, có
+    công tắc 'Xuống dòng'."""
 
     COL_W = 150            # bề rộng cột thường (px)
     TITLE_MULT = 1.5       # document_title rộng gấp 1.5
@@ -446,19 +431,13 @@ class ResultsTab(QWidget):
     def __init__(self, field_keys, parent=None):
         super().__init__(parent)
         self.field_keys = list(field_keys)
-        # Font ô: đặt pixelSize rõ ràng vì QSS font-size không áp vào item bảng.
-        self._font = QFont()
-        self._font.setPixelSize(12)
-        self._mono = QFont(MONO)
-        self._mono.setPixelSize(12)
-        self._mono.setStyleHint(QFont.Monospace)
+        self._rows: list[dict] = []
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # Công cụ (số dòng + công tắc wrap) đặt ở góc phải thanh tab —
-        # MainWindow gắn qua setCornerWidget và chỉ hiện khi ở tab Kết quả.
+        # Công cụ (số dòng + công tắc wrap) đặt ở góc phải thanh tab.
         self.tools = QWidget()
         tlay = QHBoxLayout(self.tools)
         tlay.setContentsMargins(0, 0, 11, 0)
@@ -467,108 +446,92 @@ class ResultsTab(QWidget):
         self.lbl_rows.setObjectName("count")
         self.chk_wrap = QCheckBox("Xuống dòng")
         self.chk_wrap.setCursor(Qt.PointingHandCursor)
-        self.chk_wrap.toggled.connect(self._apply_wrap)
+        self.chk_wrap.toggled.connect(self._render)
         tlay.addWidget(self.lbl_rows)
         tlay.addWidget(self.chk_wrap)
 
-        self.table = QTableWidget(0, len(self.field_keys) + 1)
-        self.table.setHorizontalHeaderLabels(["File"] + self.field_keys)
-        self.table.verticalHeader().setVisible(False)
-        # Double-click mở editor chỉ-đọc để chọn/copy text trong ô (như web).
-        self.table.setEditTriggers(QAbstractItemView.DoubleClicked)
-        self.table.setItemDelegate(SelectableCellDelegate(self.table))
-        self.table.setShowGrid(False)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setWordWrap(False)
-        self.table.setTextElideMode(Qt.ElideRight)
+        # QTextEdit chỉ-đọc: kéo chọn text bất kỳ, Ctrl+C copy — như Console.
+        self.view = QTextEdit()
+        self.view.setObjectName("resultView")
+        self.view.setReadOnly(True)
+        self.view.setTextInteractionFlags(
+            Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
+        self.view.setLineWrapMode(QTextEdit.NoWrap)
+        root.addWidget(self.view)
 
-        hh = self.table.horizontalHeader()
-        hh.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)   # canh trái header
-        hh.setSectionResizeMode(QHeaderView.Interactive)         # kéo thả chỉnh rộng
-        hh.setStretchLastSection(False)
-        hh.setDefaultSectionSize(self.COL_W)
-        hh.sectionResized.connect(self._on_section_resized)
-        self.table.setColumnWidth(0, self.COL_W)
-        for c, key in enumerate(self.field_keys, start=1):
-            w = (int(self.COL_W * self.TITLE_MULT)
-                 if key == "document_title" else self.COL_W)
-            self.table.setColumnWidth(c, w)
-        root.addWidget(self.table)
-
-        # Cho phép chọn ô rồi Ctrl+C để copy text (như bảng trên web).
-        sc = QShortcut(QKeySequence.Copy, self.table)
-        sc.activated.connect(self._copy_selection)
-
-    def _copy_selection(self):
-        rng = self.table.selectedRanges()
-        if not rng:
-            return
-        r = rng[0]
-        lines = []
-        for row in range(r.topRow(), r.bottomRow() + 1):
-            cells = []
-            for col in range(r.leftColumn(), r.rightColumn() + 1):
-                it = self.table.item(row, col)
-                cells.append(it.text() if it else "")
-            lines.append("\t".join(cells))
-        QApplication.clipboard().setText("\n".join(lines))
-
-    def _on_section_resized(self, *_):
-        # Kéo rộng cột khi đang wrap → tính lại chiều cao hàng cho vừa.
-        if self.chk_wrap.isChecked():
-            self.table.resizeRowsToContents()
+        # Gom nhiều add_result liên tiếp thành 1 lần render (tránh dựng HTML O(n²)).
+        self._refresh = QTimer(self)
+        self._refresh.setSingleShot(True)
+        self._refresh.setInterval(200)
+        self._refresh.timeout.connect(self._render)
 
     # ---- API dùng bởi MainWindow
 
     def clear_rows(self):
-        self.table.setRowCount(0)
+        self._rows = []
         self.lbl_rows.setText("0 dòng")
+        self._render()
 
     def add_result(self, result: dict):
-        t = self.table
-        r = t.rowCount()
-        t.insertRow(r)
+        self._rows.append(result)
+        self.lbl_rows.setText(f"{len(self._rows)} dòng")
+        if not self._refresh.isActive():
+            self._refresh.start()
 
-        it_name = QTableWidgetItem(result.get("name", ""))
-        it_name.setFont(self._mono)
-        it_name.setTextAlignment(Qt.AlignLeft | Qt.AlignTop)
-        if result.get("error"):
-            it_name.setForeground(QColor(C["dan"]))
-        t.setItem(r, 0, it_name)
+    # ---- dựng HTML
 
-        if result.get("error"):
-            it = QTableWidgetItem(result["error"])
-            it.setForeground(QColor(C["dan"]))
-            it.setFont(self._font)
-            it.setTextAlignment(Qt.AlignLeft | Qt.AlignTop)
-            t.setItem(r, 1, it)
-            t.setSpan(r, 1, 1, len(self.field_keys))
-        else:
-            data = result.get("data") or {}
-            for c, key in enumerate(self.field_keys, start=1):
-                val = data.get(key, "")
-                if pipeline.is_empty(val):
-                    it = QTableWidgetItem("— trống")
-                    it.setForeground(QColor(C["warn"]))
+    @staticmethod
+    def _esc(s):
+        return (str(s).replace("&", "&amp;").replace("<", "&lt;")
+                .replace(">", "&gt;"))
+
+    def _col_w(self, key):
+        return int(self.COL_W * self.TITLE_MULT) if key == "document_title" \
+            else self.COL_W
+
+    def _render(self):
+        line = C["line"]
+        ws = "" if self.chk_wrap.isChecked() else "white-space:nowrap;"
+        base = f"padding:4px 10px;border-bottom:1px solid {line};{ws}"
+
+        def cell(text, color, width, header=False):
+            wt = "font-weight:600;" if header else ""
+            return (f'<td style="{base}color:{color};width:{width}px;{wt}">'
+                    f'{self._esc(text)}</td>')
+
+        html = [f'<table cellspacing="0" cellpadding="0" '
+                f'style="font-size:12px;color:{C["tp"]};">']
+        # Header
+        html.append("<tr>" + cell("File", C["ts"], self.COL_W, True)
+                    + "".join(cell(k, C["ts"], self._col_w(k), True)
+                              for k in self.field_keys) + "</tr>")
+        # Rows
+        for res in self._rows:
+            name = self._esc(res.get("name", ""))
+            if res.get("error"):
+                html.append(
+                    f'<tr><td style="{base}color:{C["dan"]};width:{self.COL_W}px;">'
+                    f'{name}</td>'
+                    f'<td colspan="{len(self.field_keys)}" '
+                    f'style="{base}color:{C["dan"]};">{self._esc(res["error"])}'
+                    f'</td></tr>')
+                continue
+            data = res.get("data") or {}
+            cells = [cell(res.get("name", ""), C["tp"], self.COL_W)]
+            for k in self.field_keys:
+                v = data.get(k, "")
+                if pipeline.is_empty(v):
+                    cells.append(cell("— trống", C["warn"], self._col_w(k)))
                 else:
-                    it = QTableWidgetItem(str(val))
-                    it.setToolTip(str(val))
-                it.setFont(self._font)
-                it.setTextAlignment(Qt.AlignLeft | Qt.AlignTop)  # canh trái nội dung
-                t.setItem(r, c, it)
+                    cells.append(cell(v, C["tp"], self._col_w(k)))
+            html.append("<tr>" + "".join(cells) + "</tr>")
+        html.append("</table>")
 
-        if self.chk_wrap.isChecked():
-            t.resizeRowToContents(r)
-        t.scrollToBottom()
-        self.lbl_rows.setText(f"{t.rowCount()} dòng")
-
-    # ---- wrap toàn bộ dòng
-
-    def _apply_wrap(self):
-        on = self.chk_wrap.isChecked()
-        self.table.setWordWrap(on)
-        self.table.setTextElideMode(Qt.ElideNone if on else Qt.ElideRight)
-        self.table.resizeRowsToContents()
+        sb = self.view.verticalScrollBar()
+        at_bottom = sb.value() >= sb.maximum() - 4
+        self.view.setHtml("".join(html))
+        if at_bottom:
+            sb.setValue(sb.maximum())
 
 
 # ==================================================== POPUP KẾT NỐI LẠI
@@ -1309,42 +1272,20 @@ class MainWindow(QMainWindow):
 
     def _export_excel(self, stats: dict):
         """
-        Chạy trên UI thread nên hỏi được người dùng. Đọc TSV vài trăm dòng
-        rồi ghi xlsx chỉ mất vài chục ms, không cần thread riêng.
+        Chạy trên UI thread. Excel MẶC ĐỊNH ghi đè file cùng tên (ket_qua_<nguồn>.xlsx);
+        chỉ khi file đang mở trong Excel (bị khoá) mới lưu bản có timestamp.
+        (TSV thì mỗi lần chạy đã là file mới theo thời gian.)
         """
         out_dir = Path(self._run_output_dir or (APP_DIR / self.cfg["output_dir"]))
         target = pipeline.excel_target(
             out_dir, self.ed_path.text(), self.cfg.get("excel_base_name"))
 
-        if target.exists():
-            box = QMessageBox(self)
-            box.setIcon(QMessageBox.Question)
-            box.setWindowTitle("File đã tồn tại")
-            box.setText(f"{target.name} đã có trong thư mục xuất.")
-            box.setInformativeText(
-                f"{target.parent}\n\n"
-                "Ghi đè sẽ mất bản cũ. Lưu bản mới sẽ thêm timestamp vào tên.")
-            b_over = box.addButton("Ghi đè", QMessageBox.DestructiveRole)
-            b_new = box.addButton("Lưu bản mới", QMessageBox.AcceptRole)
-            b_skip = box.addButton("Không xuất", QMessageBox.RejectRole)
-            box.setDefaultButton(b_new)
-            box.exec_()
-
-            clicked = box.clickedButton()
-            if clicked is b_skip:
-                self.tab_console.append_log("warn", "bỏ qua xuất Excel")
-                stats["export_error"] = "người dùng bỏ qua"
-                return
-            if clicked is b_new:
-                target = pipeline.stamped_variant(target)
-            elif pipeline.is_locked(target):
-                # Excel đang giữ khoá ghi -> ghi đè chắc chắn thất bại
-                alt = pipeline.stamped_variant(target)
-                QMessageBox.warning(
-                    self, "File đang mở",
-                    f"{target.name} đang được mở trong Excel nên không ghi đè được.\n\n"
-                    f"Sẽ lưu thành {alt.name}.")
-                target = alt
+        # File đang mở trong Excel -> không ghi đè được -> lưu bản timestamp.
+        if target.exists() and pipeline.is_locked(target):
+            alt = pipeline.stamped_variant(target)
+            self.tab_console.append_log(
+                "warn", f"{target.name} đang mở — lưu {alt.name}")
+            target = alt
 
         try:
             p = pipeline.export_excel(stats["tsv"], target)
