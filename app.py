@@ -630,6 +630,7 @@ class MainWindow(QMainWindow):
         self._file_t0 = 0.0         # mốc thời gian file hiện tại (đếm giây)
         self._tick_count = 0        # đếm nhịp để nhấp nháy icon chậm
         self._last_elapsed = 0.0    # tổng thời gian chạy của batch vừa xong
+        self._scan_msg = ""         # thông báo lúc đang quét nguồn (thanh dưới)
 
         self.connect_worker: ConnectWorker | None = None
         self.scan_worker: ScanWorker | None = None
@@ -725,10 +726,13 @@ class MainWindow(QMainWindow):
         self.bar.setObjectName("prog")
         self.bar.setTextVisible(False)
         self.bar.setFixedHeight(6)
+        self.bar.setFixedWidth(360)       # cố định bề rộng bar
         self.bar.setProperty("hold", False)
-        lay.addWidget(self.bar, 1)
+        lay.addWidget(self.bar)
 
-        self.lbl_count = QLabel("")       # x/y ngay sau progress bar
+        lay.addStretch(1)
+
+        self.lbl_count = QLabel("")       # thành công/lỗi ở cuối (phải)
         self.lbl_count.setObjectName("count")
         lay.addWidget(self.lbl_count)
         return box
@@ -765,7 +769,7 @@ class MainWindow(QMainWindow):
         self.page_counts = []
         self.n_pages = 0
         self.lbl_count.setText("")
-        self.lbl_estimate.setText("Đang quét nguồn…")
+        self._scan_msg = "Đang quét nguồn…"
         self._apply_state()          # "Bắt đầu" bị khoá khi chưa có file
 
         self.scan_worker = ScanWorker(path, self.cb_strategy.currentData(), self)
@@ -774,7 +778,8 @@ class MainWindow(QMainWindow):
         self.scan_worker.start()
 
     def _on_scan_progress(self, counted, total):
-        self.lbl_estimate.setText(f"Đang quét… {counted}/{total} file")
+        self._scan_msg = f"Đang quét… {counted}/{total} file"
+        self._refresh_run_label()
 
     def _on_scan_done(self, files, counts, n_pages):
         self.files = list(files)
@@ -785,10 +790,10 @@ class MainWindow(QMainWindow):
         self.bar.setValue(0)
         self.lbl_count.setText(f"0/{len(self.files)}" if self.files else "")
         if not self.files:
-            self.lbl_estimate.setText("Không tìm thấy file PDF nào")
+            self._scan_msg = "Không tìm thấy file PDF nào"
             self._log("warn", "quét xong — không tìm thấy file PDF")
         else:
-            self._update_estimate_label()
+            self._scan_msg = ""
             self._log("info", f"quét xong — {len(self.files)} file · "
                               f"{self.n_pages:,} trang".replace(",", "."))
         self._apply_state()
@@ -800,24 +805,6 @@ class MainWindow(QMainWindow):
             return f"{secs}s"
         return f"{secs // 60}p{secs % 60:02d}s"
 
-    def _info_text(self) -> str:
-        """'x file · y trang · thời gian' — thời gian là ước lượng khi chưa chạy,
-        là thời gian thực tế khi đang chạy / đã xong."""
-        if not self.files:
-            return "Chưa chọn nguồn"
-        pages = f"{self.n_pages:,}".replace(",", ".")
-        base = f"{len(self.files)} file · {pages} trang"
-        if self.state == State.RUNNING and self._run_started:
-            return f"{base} · {self._fmt_dur(time.monotonic() - self._run_started)}"
-        if self.state == State.DONE and self._last_elapsed:
-            return f"{base} · {self._fmt_dur(self._last_elapsed)}"
-        spp = self.cfg.get("seconds_per_page", 0.5)
-        mins = max(1, round(self.n_pages * spp / 60))
-        return f"{base} · ~{mins} phút"
-
-    def _update_estimate_label(self):
-        self.lbl_estimate.setText(self._info_text())
-
     def _recompute_estimate(self):
         """Đổi chiến lược trang: tính lại từ số trang đã cache — KHÔNG mở lại PDF."""
         if not self.page_counts:
@@ -825,7 +812,6 @@ class MainWindow(QMainWindow):
         strat = self.cb_strategy.currentData()
         self.n_pages = sum(
             pipeline.count_selected_pages(n, strat) for n in self.page_counts)
-        self._update_estimate_label()
         self._log("info", f"chiến lược trang: {self.cb_strategy.currentText()} "
                           f"· {self.n_pages:,} trang".replace(",", "."))
         self._apply_state()
@@ -973,14 +959,10 @@ class MainWindow(QMainWindow):
         lay.setContentsMargins(12, 10, 12, 10)
         lay.setSpacing(10)
 
-        # Trạng thái + tên file (khi chạy), rồi 'x file · y trang · thời gian'.
+        # Một nhãn thống nhất: "Đang chạy: N file (M trang) · Tên file: … · Thời gian: …"
         self.lbl_run = QLabel("")
         self.lbl_run.setTextFormat(Qt.RichText)
         lay.addWidget(self.lbl_run)
-
-        self.lbl_estimate = QLabel("Chưa chọn nguồn")
-        self.lbl_estimate.setObjectName("estText")
-        lay.addWidget(self.lbl_estimate)
 
         lay.addStretch(1)
 
@@ -1082,10 +1064,7 @@ class MainWindow(QMainWindow):
 
     def _on_tick(self):
         self._tick_count += 1
-        self._refresh_run_label()
-        # Cập nhật 'thời gian thực hiện' đang chạy ở thanh dưới.
-        if self.state == State.RUNNING:
-            self.lbl_estimate.setText(self._info_text())
+        self._refresh_run_label()      # cập nhật thời gian chạy + nhấp nháy icon
 
     def _on_file_started(self, name):
         self._current_file = name
@@ -1093,30 +1072,58 @@ class MainWindow(QMainWindow):
         self._refresh_run_label()
 
     def _refresh_run_label(self):
-        """Mô tả tiến trình ở thanh dưới: icon nhấp nháy chậm + tên file + giây."""
+        """Thanh dưới: 'Đang chạy: N file (M trang) · Tên file: … · Thời gian: …'."""
+        ok, warn, ts = C["ok"], C["warn"], C["ts"]
+
+        if self._scan_msg:             # đang quét nguồn
+            self.lbl_run.setText(
+                f'<span style="color:{ts};font-weight:500">{self._scan_msg}</span>')
+            return
+
         s = self.state
-        ok, warn = C["ok"], C["warn"]
+        info = ""
+        if self.files:
+            pages = f"{self.n_pages:,}".replace(",", ".")
+            info = f"{len(self.files)} file ({pages} trang)"
+
+        def esc(x):
+            return (str(x).replace("&", "&amp;").replace("<", "&lt;")
+                    .replace(">", "&gt;"))
+
         if s == State.RUNNING:
             blink_on = (self._tick_count // 2) % 2 == 0      # 1s sáng / 1s mờ
             dot = ok if blink_on else "#bfe0d5"
-            html = (f'<span style="color:{dot};font-size:9px">●</span> '
-                    f'<span style="color:{ok};font-weight:600">Đang chạy</span>')
+            parts = [f'<span style="color:{dot};font-size:9px">●</span> '
+                     f'<span style="color:{ok};font-weight:600">Đang chạy:</span> '
+                     f'<span style="color:{ts}">{info}</span>']
             if self._current_file:
-                secs = int(time.monotonic() - self._file_t0) if self._file_t0 else 0
-                name = (self._current_file.replace("&", "&amp;")
-                        .replace("<", "&lt;").replace(">", "&gt;"))
-                html += (f'<span style="color:{C["ts"]}"> · {name} · '
-                         f'{secs}s</span>')
-            self.lbl_run.setText(html)
+                parts.append(
+                    f'<span style="color:{ts}">Tên file: {esc(self._current_file)}</span>')
+            if self._run_started:
+                parts.append(
+                    f'<span style="color:{ts}">Thời gian: '
+                    f'{self._fmt_dur(time.monotonic() - self._run_started)}</span>')
+            self.lbl_run.setText(" · ".join(parts))
         elif s == State.PAUSING:
             self.lbl_run.setText(
-                f'<span style="color:{warn};font-weight:600">● Đang tạm dừng…</span>')
+                f'<span style="color:{warn};font-weight:600">● Đang tạm dừng…</span>'
+                f' <span style="color:{ts}">· {info}</span>')
         elif s == State.PAUSED:
             self.lbl_run.setText(
-                f'<span style="color:{warn};font-weight:600">● Đã tạm dừng</span>')
+                f'<span style="color:{warn};font-weight:600">● Đã tạm dừng</span>'
+                f' <span style="color:{ts}">· {info}</span>')
         elif s == State.DONE:
+            t = (f' · <span style="color:{ts}">Thời gian: '
+                 f'{self._fmt_dur(self._last_elapsed)}</span>'
+                 if self._last_elapsed else "")
             self.lbl_run.setText(
-                f'<span style="color:{ok};font-weight:600">✓ Đã xong</span>')
+                f'<span style="color:{ok};font-weight:600">✓ Đã xong:</span> '
+                f'<span style="color:{ts}">{info}</span>{t}')
+        elif self.files:               # rảnh nhưng đã có nguồn
+            spp = self.cfg.get("seconds_per_page", 0.5)
+            mins = max(1, round(self.n_pages * spp / 60))
+            self.lbl_run.setText(
+                f'<span style="color:{ts}">Sẵn sàng · {info} · ~{mins} phút</span>')
         else:
             self.lbl_run.setText("")
 
@@ -1333,17 +1340,17 @@ class MainWindow(QMainWindow):
 
     def _on_finished(self, stats: dict):
         self._current_file = ""          # dừng đồng hồ file
-        self.state = State.DONE          # đặt sớm để _info_text dùng thời gian thực
+        self.state = State.DONE
         # Giữ progress bar ở mức số file THÀNH CÔNG (100% nếu không lỗi).
         total = max(1, stats.get("total", 1))
         self.bar.setRange(0, total)
         self.bar.setValue(stats.get("ok", 0))
+        # Thành công / lỗi ở cuối thanh trên.
         self.lbl_count.setText(
             f"{stats.get('ok', 0)}/{stats.get('total', 0)} thành công"
             + (f" · {stats.get('fail', 0)} lỗi" if stats.get("fail") else ""))
         secs = stats.get("elapsed", 0)
-        self._last_elapsed = secs        # để '_info_text' hiện thời gian thực
-        self.lbl_estimate.setText(self._info_text())
+        self._last_elapsed = secs        # tổng thời gian thực (thanh dưới)
         if stats.get("ok") and secs:
             pages = max(self.n_pages, 1)
             self.cfg["seconds_per_page"] = round(secs / pages, 3)
