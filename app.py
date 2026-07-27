@@ -727,14 +727,9 @@ class MainWindow(QMainWindow):
         self.bar.setObjectName("prog")
         self.bar.setTextVisible(False)
         self.bar.setFixedHeight(6)
-        # Bề rộng bar set động (_sync_bar_width) để mép phải thẳng ed_path.
+        # Bề rộng bar set động (_sync_bar_width): mép phải thẳng nút "Thư mục".
         self.bar.setProperty("hold", False)
         lay.addWidget(self.bar)
-
-        # Thành công/lỗi ngay sau bar.
-        self.lbl_count = QLabel("")
-        self.lbl_count.setObjectName("count")
-        lay.addWidget(self.lbl_count)
 
         lay.addStretch(1)
         return box
@@ -968,6 +963,11 @@ class MainWindow(QMainWindow):
 
         lay.addStretch(1)
 
+        # Thành công/lỗi bên phải, trước cụm nút.
+        self.lbl_count = QLabel("")
+        self.lbl_count.setObjectName("count")
+        lay.addWidget(self.lbl_count)
+
         self.btn_start = QPushButton("Bắt đầu")
         self.btn_pause = QPushButton("Tạm dừng")
         self.btn_resume = QPushButton("Tiếp tục")
@@ -1137,13 +1137,14 @@ class MainWindow(QMainWindow):
         widget.style().polish(widget)
 
     def _sync_bar_width(self):
-        """Đặt bề rộng progress bar để mép PHẢI thẳng với mép phải ô đường dẫn
-        nguồn (ed_path) ở hàng trên."""
-        if not hasattr(self, "bar") or not hasattr(self, "ed_path"):
+        """Đặt bề rộng progress bar để mép PHẢI thẳng với mép phải nút 'Thư mục'
+        (mép phải ngoài cùng của hàng Nguồn)."""
+        if not hasattr(self, "bar") or not hasattr(self, "btn_pick_dir"):
             return
-        edp_right = self.ed_path.mapTo(self, self.ed_path.rect().topRight()).x()
+        right = self.btn_pick_dir.mapTo(
+            self, self.btn_pick_dir.rect().topRight()).x()
         bar_left = self.bar.mapTo(self, self.bar.rect().topLeft()).x()
-        w = edp_right - bar_left
+        w = right - bar_left
         if w > 80:
             self.bar.setFixedWidth(w)
 
