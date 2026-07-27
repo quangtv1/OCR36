@@ -542,8 +542,8 @@ def process_pdf(pdf_path, fields, client, model_name, cfg,
             merged, cfg["correction_policy"])
 
     return {
-        "file": str(pdf_path),
-        "name": Path(pdf_path).name,
+        "file": str(Path(pdf_path).resolve()),   # đường dẫn tuyệt đối (cho xlsx)
+        "name": Path(pdf_path).name,              # chỉ tên file (cho tab Kết quả)
         "total_pages": total,
         "pages_processed": sorted(p + 1 for p, _ in collected),
         "sent_pages": sent_pages,
@@ -581,7 +581,8 @@ class TsvWriter:
 
     def append(self, result: dict):
         ts = datetime.now().strftime("%d.%m.%Y-%H:%M:%S")
-        row = [self._clean(result.get("name")), ts]
+        # Cột "file" ghi đường dẫn tuyệt đối; fallback tên file nếu thiếu.
+        row = [self._clean(result.get("file") or result.get("name")), ts]
         data = result.get("data") or {}
         row += [self._clean(data.get(k, "")) for k in self.field_keys]
 
