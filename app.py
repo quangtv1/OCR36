@@ -114,9 +114,9 @@ def build_stylesheet() -> str:
 
     /* bảng */
     QTableWidget {{ background:{C['s2']}; border:none; gridline-color:transparent;
-        font-size:13px; selection-background-color:{C['acc_bg']};
+        font-size:12px; selection-background-color:{C['acc_bg']};
         selection-color:{C['tp']}; }}
-    QTableWidget::item {{ padding:5px 8px; border-bottom:1px solid {C['line']}; }}
+    QTableWidget::item {{ padding:4px 8px; border-bottom:1px solid {C['line']}; }}
     QHeaderView::section {{ background:{C['s1']}; color:{C['ts']}; border:none;
         border-bottom:1px solid {C['line']}; padding:6px 10px;
         font-size:11px; font-weight:400; }}
@@ -232,6 +232,12 @@ class MetadataTab(QWidget):
         self._snapshot: dict = {}
         self._editing = False
         self._loading = False
+        # Font ô 12px (đặt rõ ràng vì QSS không áp cỡ vào item bảng).
+        self._font = QFont()
+        self._font.setPixelSize(12)
+        self._mono = QFont(MONO)
+        self._mono.setPixelSize(12)
+        self._mono.setStyleHint(QFont.Monospace)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -298,18 +304,18 @@ class MetadataTab(QWidget):
 
             it_key = QTableWidgetItem(key)
             it_key.setFlags(it_key.flags() & ~Qt.ItemIsEditable)
-            mono = QFont(MONO, 10)
-            mono.setStyleHint(QFont.Monospace)
-            it_key.setFont(mono)
+            it_key.setFont(self._mono)
             self.table.setItem(r, 0, it_key)
 
             it_desc = QTableWidgetItem(str(desc))
             it_desc.setToolTip(str(desc))
+            it_desc.setFont(self._font)
             self.table.setItem(r, 1, it_desc)
 
             pol = self.policy.get(key, "skip")
             it_pol = QTableWidgetItem(POLICY_LABEL.get(pol, pol))
             it_pol.setFlags(it_pol.flags() & ~Qt.ItemIsEditable)
+            it_pol.setFont(self._font)
             it_pol.setTextAlignment(Qt.AlignCenter)
             it_pol.setForeground(QColor(POLICY_COLOR.get(pol, C["tm"])))
             self.table.setItem(r, 2, it_pol)
@@ -419,7 +425,11 @@ class ResultsTab(QWidget):
     def __init__(self, field_keys, parent=None):
         super().__init__(parent)
         self.field_keys = list(field_keys)
-        self._mono = QFont(MONO, 10)
+        # Font ô: đặt pixelSize rõ ràng vì QSS font-size không áp vào item bảng.
+        self._font = QFont()
+        self._font.setPixelSize(12)
+        self._mono = QFont(MONO)
+        self._mono.setPixelSize(12)
         self._mono.setStyleHint(QFont.Monospace)
 
         root = QVBoxLayout(self)
@@ -488,6 +498,7 @@ class ResultsTab(QWidget):
         if result.get("error"):
             it = QTableWidgetItem(result["error"])
             it.setForeground(QColor(C["dan"]))
+            it.setFont(self._font)
             it.setTextAlignment(Qt.AlignLeft | Qt.AlignTop)
             t.setItem(r, 1, it)
             t.setSpan(r, 1, 1, len(self.field_keys))
@@ -501,6 +512,7 @@ class ResultsTab(QWidget):
                 else:
                     it = QTableWidgetItem(str(val))
                     it.setToolTip(str(val))
+                it.setFont(self._font)
                 it.setTextAlignment(Qt.AlignLeft | Qt.AlignTop)  # canh trái nội dung
                 t.setItem(r, c, it)
 
