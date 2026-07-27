@@ -17,8 +17,8 @@ from PyQt5.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog,
     QFileDialog, QFrame, QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel,
     QLineEdit, QMainWindow, QMessageBox, QProgressBar, QPushButton,
-    QShortcut, QSplitter, QTableWidget, QTableWidgetItem, QTabWidget,
-    QTextEdit, QVBoxLayout, QWidget,
+    QShortcut, QSplitter, QStyledItemDelegate, QTableWidget, QTableWidgetItem,
+    QTabWidget, QTextEdit, QVBoxLayout, QWidget,
 )
 
 import pipeline
@@ -418,6 +418,24 @@ class MetadataTab(QWidget):
 
 # ==================================================== TAB KẾT QUẢ
 
+class SelectableCellDelegate(QStyledItemDelegate):
+    """Mở editor CHỈ-ĐỌC khi double-click ô → chọn/copy text trong ô như bảng
+    web, nhưng không cho sửa giá trị (setModelData bỏ qua)."""
+
+    def createEditor(self, parent, option, index):
+        e = QLineEdit(parent)
+        e.setReadOnly(True)
+        e.setFrame(False)
+        return e
+
+    def setEditorData(self, editor, index):
+        editor.setText(index.data(Qt.DisplayRole) or "")
+        editor.selectAll()
+
+    def setModelData(self, editor, model, index):
+        pass        # không ghi lại → giá trị kết quả giữ nguyên
+
+
 class ResultsTab(QWidget):
     """Bảng kết quả: cột document_title rộng 1.5×, canh trái mọi cột, có công
     tắc 'Xuống dòng' để wrap toàn bộ ô."""
@@ -456,7 +474,9 @@ class ResultsTab(QWidget):
         self.table = QTableWidget(0, len(self.field_keys) + 1)
         self.table.setHorizontalHeaderLabels(["File"] + self.field_keys)
         self.table.verticalHeader().setVisible(False)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        # Double-click mở editor chỉ-đọc để chọn/copy text trong ô (như web).
+        self.table.setEditTriggers(QAbstractItemView.DoubleClicked)
+        self.table.setItemDelegate(SelectableCellDelegate(self.table))
         self.table.setShowGrid(False)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setWordWrap(False)
@@ -1166,6 +1186,8 @@ class MainWindow(QMainWindow):
 
         self.state = State.RUNNING
         self._apply_state()
+        # Đưa focus vào Console (tránh nhảy vào ô cài đặt khi các ô bị khoá).
+        self.tab_console.setFocus()
 
     def on_pause(self):
         if self.ocr_worker:
