@@ -668,6 +668,7 @@ class MainWindow(QMainWindow):
         self._tick.timeout.connect(self._on_tick)
 
         self._apply_state()
+        QTimer.singleShot(0, self._sync_bar_width)   # căn bar sau khi layout xong
 
         # Console = nhật ký thao tác. Ghi tóm tắt khi khởi động.
         self.tab_meta.saved.connect(
@@ -716,7 +717,7 @@ class MainWindow(QMainWindow):
         box.setObjectName("estBar")
         lay = QHBoxLayout(box)
         lay.setContentsMargins(12, 6, 12, 6)
-        lay.setSpacing(10)
+        lay.setSpacing(8)                 # khớp spacing hàng Nguồn để căn mép
 
         lbl = QLabel("Tiến trình")
         lbl.setObjectName("estText")
@@ -726,15 +727,16 @@ class MainWindow(QMainWindow):
         self.bar.setObjectName("prog")
         self.bar.setTextVisible(False)
         self.bar.setFixedHeight(6)
-        self.bar.setFixedWidth(360)       # cố định bề rộng bar
+        # Bề rộng bar set động (_sync_bar_width) để mép phải thẳng ed_path.
         self.bar.setProperty("hold", False)
         lay.addWidget(self.bar)
 
-        lay.addStretch(1)
-
-        self.lbl_count = QLabel("")       # thành công/lỗi ở cuối (phải)
+        # Thành công/lỗi ngay sau bar.
+        self.lbl_count = QLabel("")
         self.lbl_count.setObjectName("count")
         lay.addWidget(self.lbl_count)
+
+        lay.addStretch(1)
         return box
 
     def on_pick_file(self):
@@ -1133,6 +1135,21 @@ class MainWindow(QMainWindow):
         widget.setProperty(name, value)
         widget.style().unpolish(widget)
         widget.style().polish(widget)
+
+    def _sync_bar_width(self):
+        """Đặt bề rộng progress bar để mép PHẢI thẳng với mép phải ô đường dẫn
+        nguồn (ed_path) ở hàng trên."""
+        if not hasattr(self, "bar") or not hasattr(self, "ed_path"):
+            return
+        edp_right = self.ed_path.mapTo(self, self.ed_path.rect().topRight()).x()
+        bar_left = self.bar.mapTo(self, self.bar.rect().topLeft()).x()
+        w = edp_right - bar_left
+        if w > 80:
+            self.bar.setFixedWidth(w)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._sync_bar_width()
 
     @staticmethod
     def _int_field(widget, default, lo=None, hi=None):
